@@ -198,6 +198,15 @@ docker compose run --rm app bin/setup-container
 docker compose run --rm app bin/test-container
 ```
 
+Equivalent `make` shortcuts:
+
+```bash
+make build
+make setup
+make test
+make verify
+```
+
 <br/>
 
 ## FAQ
@@ -242,6 +251,12 @@ Container workspace setup for Codex/Cursor:
 docker compose build app
 docker compose run --rm app bin/setup-container
 docker compose run --rm app bin/test-container
+```
+
+Or with `make`:
+
+```bash
+make verify
 ```
 
 Cursor can attach through [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json), which uses the `app` service from [`docker-compose.yml`](docker-compose.yml) and runs [`bin/setup-container`](bin/setup-container) on first create.

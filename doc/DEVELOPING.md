@@ -99,6 +99,15 @@ docker compose run --rm app bin/setup-container
 docker compose run --rm app bin/test-container
 ```
 
+Equivalent shortcuts from the repo root:
+
+```sh
+make build
+make setup
+make test
+make verify
+```
+
 What this does:
 
 - `app` mounts the repo at `/workspace`

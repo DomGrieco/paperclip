@@ -30,6 +30,7 @@ type EmbeddedPostgresCtor = new (opts: {
 
 const tempPaths: string[] = [];
 const runningInstances: EmbeddedPostgresInstance[] = [];
+const TRANSIENT_EMBEDDED_POSTGRES_ATTEMPTS = 3;
 
 async function getEmbeddedPostgresCtor(): Promise<EmbeddedPostgresCtor> {
   const mod = await import("embedded-postgres");
@@ -57,27 +58,54 @@ async function getAvailablePort(): Promise<number> {
 }
 
 async function createTempDatabase(): Promise<string> {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-client-"));
-  tempPaths.push(dataDir);
-  const port = await getAvailablePort();
   const EmbeddedPostgres = await getEmbeddedPostgresCtor();
-  const instance = new EmbeddedPostgres({
-    databaseDir: dataDir,
-    user: "paperclip",
-    password: "paperclip",
-    port,
-    persistent: true,
-    initdbFlags: ["--encoding=UTF8", "--locale=C"],
-    onLog: () => {},
-    onError: () => {},
-  });
-  await instance.initialise();
-  await instance.start();
-  runningInstances.push(instance);
+  let lastError: unknown;
+  let lastLogs = "";
 
-  const adminUrl = `postgres://paperclip:paperclip@127.0.0.1:${port}/postgres`;
-  await ensurePostgresDatabase(adminUrl, "paperclip");
-  return `postgres://paperclip:paperclip@127.0.0.1:${port}/paperclip`;
+  for (let attempt = 1; attempt <= TRANSIENT_EMBEDDED_POSTGRES_ATTEMPTS; attempt += 1) {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-db-client-"));
+    tempPaths.push(dataDir);
+    const port = await getAvailablePort();
+    const logs: string[] = [];
+    const instance = new EmbeddedPostgres({
+      databaseDir: dataDir,
+      user: "paperclip",
+      password: "paperclip",
+      port,
+      persistent: true,
+      initdbFlags: ["--encoding=UTF8", "--locale=C"],
+      onLog: (message) => {
+        logs.push(String(message));
+      },
+      onError: (message) => {
+        logs.push(String(message));
+      },
+    });
+
+    try {
+      await instance.initialise();
+      await instance.start();
+      runningInstances.push(instance);
+
+      const adminUrl = `postgres://paperclip:paperclip@127.0.0.1:${port}/postgres`;
+      await ensurePostgresDatabase(adminUrl, "paperclip");
+      return `postgres://paperclip:paperclip@127.0.0.1:${port}/paperclip`;
+    } catch (error) {
+      lastError = error;
+      lastLogs = logs.join("").trim();
+      await instance.stop().catch(() => {});
+      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (attempt === TRANSIENT_EMBEDDED_POSTGRES_ATTEMPTS) {
+        break;
+      }
+    }
+  }
+
+  const message =
+    lastError instanceof Error ? lastError.message : `Failed to initialize embedded Postgres after ${TRANSIENT_EMBEDDED_POSTGRES_ATTEMPTS} attempts`;
+  throw new Error(
+    lastLogs.length > 0 ? `${message}\n\nEmbedded Postgres logs:\n${lastLogs}` : message,
+  );
 }
 
 async function migrationHash(migrationFile: string): Promise<string> {
