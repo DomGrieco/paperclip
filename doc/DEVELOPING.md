@@ -89,6 +89,24 @@ docker compose -f docker-compose.quickstart.yml up --build
 
 See `doc/DOCKER.md` for API key wiring (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY`) and persistence details.
 
+## Container Workspace For Codex/Cursor
+
+Use the repo's `app` service when you want an editable container workspace instead of the packaged runtime image:
+
+```sh
+docker compose build app
+docker compose run --rm app bin/setup-container
+docker compose run --rm app bin/test-container
+```
+
+What this does:
+
+- `app` mounts the repo at `/workspace`
+- `bin/setup-container` runs `pnpm install --frozen-lockfile`
+- `bin/test-container` runs `pnpm typecheck`, `pnpm test:run`, and `pnpm build`
+
+Cursor can attach through `.devcontainer/devcontainer.json`, which targets the same `app` service and runs `bin/setup-container` after container creation.
+
 ## Docker For Untrusted PR Review
 
 For a separate review-oriented container that keeps `codex`/`claude` login state in Docker volumes and checks out PRs into an isolated scratch workspace, see `doc/UNTRUSTED-PR-REVIEW.md`.

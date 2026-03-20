@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+if [ "${PAPERCLIP_RUN_AS_NODE:-0}" != "1" ] && [ "$(id -u)" -eq 0 ] && id node >/dev/null 2>&1; then
+  mkdir -p /workspace/node_modules /pnpm/store
+  chown -R node:node /workspace/node_modules /pnpm/store
+  exec runuser -u node -- env \
+    PAPERCLIP_RUN_AS_NODE=1 \
+    HOME=/home/node \
+    PNPM_STORE_DIR="${PNPM_STORE_DIR:-/pnpm/store}" \
+    PATH="$PATH" \
+    sh "$0" "$@"
+fi
+
+corepack enable >/dev/null 2>&1 || true
+pnpm install --frozen-lockfile --store-dir /pnpm/store

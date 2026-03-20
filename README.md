@@ -190,6 +190,14 @@ This starts the API server at `http://localhost:3100`. An embedded PostgreSQL da
 
 > **Requirements:** Node.js 20+, pnpm 9.15+
 
+If you prefer a containerized contributor setup for Codex/Cursor work:
+
+```bash
+docker compose build app
+docker compose run --rm app bin/setup-container
+docker compose run --rm app bin/test-container
+```
+
 <br/>
 
 ## FAQ
@@ -227,6 +235,16 @@ pnpm test:run         # Run tests
 pnpm db:generate      # Generate DB migration
 pnpm db:migrate       # Apply migrations
 ```
+
+Container workspace setup for Codex/Cursor:
+
+```bash
+docker compose build app
+docker compose run --rm app bin/setup-container
+docker compose run --rm app bin/test-container
+```
+
+Cursor can attach through [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json), which uses the `app` service from [`docker-compose.yml`](docker-compose.yml) and runs [`bin/setup-container`](bin/setup-container) on first create.
 
 See [doc/DEVELOPING.md](doc/DEVELOPING.md) for the full development guide.
 

@@ -1,4 +1,8 @@
-import { definePlugin, runWorker } from "@paperclipai/plugin-sdk";
+import {
+  definePlugin,
+  runWorker,
+  type PluginContext,
+} from "@paperclipai/plugin-sdk";
 
 const PLUGIN_NAME = "hello-world-example";
 const HEALTH_MESSAGE = "Hello World example plugin ready";
@@ -11,7 +15,7 @@ const plugin = definePlugin({
   /**
    * Called when the host starts the plugin worker.
    */
-  async setup(ctx) {
+  async setup(ctx: PluginContext) {
     ctx.logger.info(`${PLUGIN_NAME} plugin setup complete`);
   },
 

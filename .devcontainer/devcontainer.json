@@ -1,0 +1,21 @@
+{
+  "name": "paperclip",
+  "dockerComposeFile": [
+    "../docker-compose.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "overrideCommand": false,
+  "remoteUser": "node",
+  "shutdownAction": "stopCompose",
+  "postCreateCommand": "bin/setup-container",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-playwright.playwright"
+      ]
+    }
+  }
+}

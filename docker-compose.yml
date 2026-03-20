@@ -1,4 +1,22 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    working_dir: /workspace
+    command: ["sh", "-lc", "sleep infinity"]
+    environment:
+      CI: "1"
+      HOME: /home/node
+      npm_config_store_dir: /pnpm/store
+      PAPERCLIP_HOME: /workspace/.paperclip-container
+    user: node
+    volumes:
+      - .:/workspace
+      - paperclip-node-modules:/workspace/node_modules
+      - paperclip-pnpm-store:/pnpm/store
+
   db:
     image: postgres:17-alpine
     environment:
@@ -26,7 +44,7 @@ services:
       PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
-      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
     volumes:
       - paperclip-data:/paperclip
     depends_on:
@@ -36,3 +54,5 @@ services:
 volumes:
   pgdata:
   paperclip-data:
+  paperclip-node-modules:
+  paperclip-pnpm-store:
