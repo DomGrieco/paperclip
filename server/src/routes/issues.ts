@@ -23,6 +23,7 @@ import {
   goalService,
   heartbeatService,
   issueApprovalService,
+  issueRunGraphService,
   issueService,
   documentService,
   logActivity,
@@ -42,6 +43,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
   const svc = issueService(db);
   const access = accessService(db);
   const heartbeat = heartbeatService(db);
+  const issueRunGraph = issueRunGraphService(db);
   const agentsSvc = agentService(db);
   const projectsSvc = projectService(db);
   const goalsSvc = goalService(db);
@@ -303,7 +305,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const [ancestors, project, goal, mentionedProjectIds, documentPayload] = await Promise.all([
+    const [ancestors, project, goal, mentionedProjectIds, documentPayload, orchestration] = await Promise.all([
       svc.getAncestors(issue.id),
       issue.projectId ? projectsSvc.getById(issue.projectId) : null,
       issue.goalId
@@ -313,6 +315,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
           : null,
       svc.findMentionedProjectIds(issue.id),
       documentsSvc.getIssueDocumentPayload(issue),
+      issueRunGraph.getIssueSummary(issue.id),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -331,7 +334,20 @@ export function issueRoutes(db: Db, storage: StorageService) {
       mentionedProjects,
       currentExecutionWorkspace,
       workProducts,
+      orchestration,
     });
+  });
+
+  router.get("/issues/:id/run-graph", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await svc.getById(id);
+    if (!issue) {
+      res.status(404).json({ error: "Issue not found" });
+      return;
+    }
+    assertCompanyAccess(req, issue.companyId);
+    const orchestration = await issueRunGraph.getIssueSummary(issue.id);
+    res.json(orchestration);
   });
 
   router.get("/issues/:id/heartbeat-context", async (req, res) => {

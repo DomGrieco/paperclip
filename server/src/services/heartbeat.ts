@@ -41,6 +41,7 @@ import {
 import { issueService } from "./issues.js";
 import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
+import { issueRunGraphService } from "./issue-run-graph.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   gateProjectExecutionWorkspacePolicy,
@@ -706,6 +707,7 @@ export function heartbeatService(db: Db) {
     cancelWorkForScope: cancelBudgetScopeWork,
   };
   const budgets = budgetService(db, budgetHooks);
+  const issueRunGraph = issueRunGraphService(db);
 
   async function getAgent(agentId: string) {
     return db
@@ -2612,6 +2614,7 @@ export function heartbeatService(db: Db) {
       payload,
     });
     const issueId = readNonEmptyString(enrichedContextSnapshot.issueId) ?? issueIdFromPayload;
+    const workerGraph = issueId ? await issueRunGraph.resolveWorkerGraph(issueId, agentId) : null;
 
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
@@ -2818,6 +2821,9 @@ export function heartbeatService(db: Db) {
               requestedByActorId: opts.requestedByActorId ?? null,
               idempotencyKey: opts.idempotencyKey ?? null,
               runId: mergedRun.id,
+              rootRunId: workerGraph?.rootRunId ?? null,
+              parentRunId: workerGraph?.parentRunId ?? null,
+              targetRunType: workerGraph?.runType ?? null,
               finishedAt: new Date(),
             });
 
@@ -2882,6 +2888,9 @@ export function heartbeatService(db: Db) {
             requestedByActorType: opts.requestedByActorType ?? null,
             requestedByActorId: opts.requestedByActorId ?? null,
             idempotencyKey: opts.idempotencyKey ?? null,
+            rootRunId: workerGraph?.rootRunId ?? null,
+            parentRunId: workerGraph?.parentRunId ?? null,
+            targetRunType: workerGraph?.runType ?? null,
           });
 
           return { kind: "deferred" as const };
@@ -2900,6 +2909,9 @@ export function heartbeatService(db: Db) {
             requestedByActorType: opts.requestedByActorType ?? null,
             requestedByActorId: opts.requestedByActorId ?? null,
             idempotencyKey: opts.idempotencyKey ?? null,
+            rootRunId: workerGraph?.rootRunId ?? null,
+            parentRunId: workerGraph?.parentRunId ?? null,
+            targetRunType: workerGraph?.runType ?? null,
           })
           .returning()
           .then((rows) => rows[0]);
@@ -2915,6 +2927,10 @@ export function heartbeatService(db: Db) {
             wakeupRequestId: wakeupRequest.id,
             contextSnapshot: enrichedContextSnapshot,
             sessionIdBefore: sessionBefore,
+            runType: workerGraph?.runType ?? "worker",
+            rootRunId: workerGraph?.rootRunId ?? null,
+            parentRunId: workerGraph?.parentRunId ?? null,
+            graphDepth: workerGraph?.graphDepth ?? 0,
           })
           .returning()
           .then((rows) => rows[0]);
@@ -3007,6 +3023,9 @@ export function heartbeatService(db: Db) {
         requestedByActorId: opts.requestedByActorId ?? null,
         idempotencyKey: opts.idempotencyKey ?? null,
         runId: mergedRun.id,
+        rootRunId: workerGraph?.rootRunId ?? null,
+        parentRunId: workerGraph?.parentRunId ?? null,
+        targetRunType: workerGraph?.runType ?? null,
         finishedAt: new Date(),
       });
       return mergedRun;
@@ -3025,6 +3044,9 @@ export function heartbeatService(db: Db) {
         requestedByActorType: opts.requestedByActorType ?? null,
         requestedByActorId: opts.requestedByActorId ?? null,
         idempotencyKey: opts.idempotencyKey ?? null,
+        rootRunId: workerGraph?.rootRunId ?? null,
+        parentRunId: workerGraph?.parentRunId ?? null,
+        targetRunType: workerGraph?.runType ?? null,
       })
       .returning()
       .then((rows) => rows[0]);
@@ -3042,6 +3064,10 @@ export function heartbeatService(db: Db) {
         wakeupRequestId: wakeupRequest.id,
         contextSnapshot: enrichedContextSnapshot,
         sessionIdBefore: sessionBefore,
+        runType: workerGraph?.runType ?? "worker",
+        rootRunId: workerGraph?.rootRunId ?? null,
+        parentRunId: workerGraph?.parentRunId ?? null,
+        graphDepth: workerGraph?.graphDepth ?? 0,
       })
       .returning()
       .then((rows) => rows[0]);

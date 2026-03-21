@@ -10,9 +10,11 @@ import {
   companies,
   createDb,
   ensurePostgresDatabase,
+  issues,
   heartbeatRuns,
 } from "@paperclipai/db";
 import type { HeartbeatRun } from "@paperclipai/shared";
+import { issueRunGraphService } from "../services/issue-run-graph.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -147,5 +149,41 @@ describe("run graph schema contract", () => {
     expect(run.runType).toBe("planner");
     expect(run.rootRunId).toBe(run.id);
     expect(run.verificationVerdict).toBeNull();
+  }, 20_000);
+
+  it("creates a planner root and bounded worker children for an issue", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Build run graph",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const root = await graph.startPlannerRoot(issue.id, agent.id);
+    const children = await graph.spawnWorkers(root.id, [
+      { taskKey: "worker-a" },
+      { taskKey: "worker-b" },
+    ]);
+
+    expect(root.runType).toBe("planner");
+    expect(children).toHaveLength(2);
+    expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
   }, 20_000);
 });
