@@ -276,6 +276,26 @@ export const HEARTBEAT_RUN_STATUSES = [
 ] as const;
 export type HeartbeatRunStatus = (typeof HEARTBEAT_RUN_STATUSES)[number];
 
+export const HEARTBEAT_RUN_TYPES = ["planner", "worker", "verification"] as const;
+export type HeartbeatRunType = (typeof HEARTBEAT_RUN_TYPES)[number];
+
+export const VERIFICATION_VERDICTS = ["pass", "repair", "fail_terminal"] as const;
+export type VerificationVerdict = (typeof VERIFICATION_VERDICTS)[number];
+
+export const EVIDENCE_POLICIES = [
+  "code_ci_evaluator_summary",
+  "code_ci_evaluator_summary_artifacts",
+  "custom",
+] as const;
+export type EvidencePolicy = (typeof EVIDENCE_POLICIES)[number];
+
+export const EVIDENCE_POLICY_SOURCES = [
+  "company_default",
+  "agent_override",
+  "issue_override",
+] as const;
+export type EvidencePolicySource = (typeof EVIDENCE_POLICY_SOURCES)[number];
+
 export const LIVE_EVENT_TYPES = [
   "heartbeat.run.queued",
   "heartbeat.run.status",

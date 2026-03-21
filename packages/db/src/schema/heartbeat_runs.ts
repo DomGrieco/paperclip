@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, index, integer, bigint, boolean } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, pgTable, uuid, text, timestamp, jsonb, index, integer, bigint, boolean } from "drizzle-orm/pg-core";
 import { companies } from "./companies.js";
 import { agents } from "./agents.js";
 import { agentWakeupRequests } from "./agent_wakeup_requests.js";
@@ -15,7 +15,7 @@ export const heartbeatRuns = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     error: text("error"),
-    wakeupRequestId: uuid("wakeup_request_id").references(() => agentWakeupRequests.id),
+    wakeupRequestId: uuid("wakeup_request_id").references((): AnyPgColumn => agentWakeupRequests.id),
     exitCode: integer("exit_code"),
     signal: text("signal"),
     usageJson: jsonb("usage_json").$type<Record<string, unknown>>(),
@@ -32,6 +32,14 @@ export const heartbeatRuns = pgTable(
     errorCode: text("error_code"),
     externalRunId: text("external_run_id"),
     contextSnapshot: jsonb("context_snapshot").$type<Record<string, unknown>>(),
+    runType: text("run_type").notNull().default("worker"),
+    rootRunId: uuid("root_run_id").references((): AnyPgColumn => heartbeatRuns.id, { onDelete: "set null" }),
+    parentRunId: uuid("parent_run_id").references((): AnyPgColumn => heartbeatRuns.id, { onDelete: "set null" }),
+    graphDepth: integer("graph_depth").notNull().default(0),
+    verificationVerdict: text("verification_verdict"),
+    repairAttempt: integer("repair_attempt").notNull().default(0),
+    policySnapshotJson: jsonb("policy_snapshot_json").$type<Record<string, unknown>>(),
+    artifactBundleJson: jsonb("artifact_bundle_json").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -41,5 +49,7 @@ export const heartbeatRuns = pgTable(
       table.agentId,
       table.startedAt,
     ),
+    rootRunIdx: index("heartbeat_runs_root_run_idx").on(table.rootRunId),
+    parentRunIdx: index("heartbeat_runs_parent_run_idx").on(table.parentRunId),
   }),
 );

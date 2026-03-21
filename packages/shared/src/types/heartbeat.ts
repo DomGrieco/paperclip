@@ -1,11 +1,15 @@
 import type {
+  EvidencePolicy,
   AgentRole,
   AgentStatus,
   HeartbeatInvocationSource,
   HeartbeatRunStatus,
+  HeartbeatRunType,
+  VerificationVerdict,
   WakeupTriggerDetail,
   WakeupRequestStatus,
 } from "../constants.js";
+import type { OrchestrationArtifactBundle, OrchestrationPolicySnapshot } from "./orchestration.js";
 
 export interface HeartbeatRun {
   id: string;
@@ -34,6 +38,14 @@ export interface HeartbeatRun {
   errorCode: string | null;
   externalRunId: string | null;
   contextSnapshot: Record<string, unknown> | null;
+  runType: HeartbeatRunType;
+  rootRunId: string | null;
+  parentRunId: string | null;
+  graphDepth: number;
+  verificationVerdict: VerificationVerdict | null;
+  repairAttempt: number;
+  policySnapshotJson: OrchestrationPolicySnapshot | null;
+  artifactBundleJson: OrchestrationArtifactBundle | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -100,6 +112,12 @@ export interface AgentWakeupRequest {
   requestedByActorId: string | null;
   idempotencyKey: string | null;
   runId: string | null;
+  rootRunId: string | null;
+  parentRunId: string | null;
+  targetRunType: HeartbeatRunType | null;
+  repairAttempt: number;
+  requestedEvidencePolicy: EvidencePolicy | null;
+  verificationRunId: string | null;
   requestedAt: Date;
   claimedAt: Date | null;
   finishedAt: Date | null;

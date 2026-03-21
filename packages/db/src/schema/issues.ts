@@ -42,6 +42,10 @@ export const issues = pgTable(
     identifier: text("identifier"),
     requestDepth: integer("request_depth").notNull().default(0),
     billingCode: text("billing_code"),
+    evidencePolicy: text("evidence_policy").notNull().default("code_ci_evaluator_summary"),
+    evidencePolicySource: text("evidence_policy_source").notNull().default("company_default"),
+    reviewReadyAt: timestamp("review_ready_at", { withTimezone: true }),
+    lastVerificationRunId: uuid("last_verification_run_id").references(() => heartbeatRuns.id, { onDelete: "set null" }),
     assigneeAdapterOverrides: jsonb("assignee_adapter_overrides").$type<Record<string, unknown>>(),
     executionWorkspaceId: uuid("execution_workspace_id")
       .references((): AnyPgColumn => executionWorkspaces.id, { onDelete: "set null" }),
@@ -70,6 +74,7 @@ export const issues = pgTable(
     projectIdx: index("issues_company_project_idx").on(table.companyId, table.projectId),
     projectWorkspaceIdx: index("issues_company_project_workspace_idx").on(table.companyId, table.projectWorkspaceId),
     executionWorkspaceIdx: index("issues_company_execution_workspace_idx").on(table.companyId, table.executionWorkspaceId),
+    reviewReadyIdx: index("issues_company_review_ready_idx").on(table.companyId, table.reviewReadyAt),
     identifierIdx: uniqueIndex("issues_identifier_idx").on(table.identifier),
   }),
 );

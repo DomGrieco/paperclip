@@ -1,5 +1,11 @@
-import type { IssuePriority, IssueStatus } from "../constants.js";
+import type {
+  EvidencePolicy,
+  EvidencePolicySource,
+  IssuePriority,
+  IssueStatus,
+} from "../constants.js";
 import type { Goal } from "./goal.js";
+import type { IssueEvidenceBundle, IssueOrchestrationSummary } from "./orchestration.js";
 import type { Project, ProjectWorkspace } from "./project.js";
 import type { ExecutionWorkspace, IssueExecutionWorkspaceSettings } from "./workspace-runtime.js";
 import type { IssueWorkProduct } from "./work-product.js";
@@ -118,6 +124,10 @@ export interface Issue {
   identifier: string | null;
   requestDepth: number;
   billingCode: string | null;
+  evidencePolicy: EvidencePolicy;
+  evidencePolicySource: EvidencePolicySource;
+  reviewReadyAt: Date | null;
+  lastVerificationRunId: string | null;
   assigneeAdapterOverrides: IssueAssigneeAdapterOverrides | null;
   executionWorkspaceId: string | null;
   executionWorkspacePreference: string | null;
@@ -135,6 +145,8 @@ export interface Issue {
   goal?: Goal | null;
   currentExecutionWorkspace?: ExecutionWorkspace | null;
   workProducts?: IssueWorkProduct[];
+  orchestration?: IssueOrchestrationSummary | null;
+  evidenceBundle?: IssueEvidenceBundle | null;
   mentionedProjects?: Project[];
   myLastTouchAt?: Date | null;
   lastExternalCommentAt?: Date | null;
