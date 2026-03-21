@@ -5,6 +5,10 @@ Date: 2026-02-17
 Audience: Product + Engineering  
 Scope: Agent execution runtime, adapter protocol, wakeup orchestration, and live status delivery
 
+Note (2026-03-21): the next orchestration architecture is now specified in `doc/spec/feature-1-hierarchical-orchestration.md`.
+This document still captures the current heartbeat-centric runtime subsystem and adapter details.
+Where the docs conflict for the next implementation program, the newer feature spec controls.
+
 ## 1. Document Role
 
 This spec defines how Paperclip actually runs agents while staying runtime-agnostic.

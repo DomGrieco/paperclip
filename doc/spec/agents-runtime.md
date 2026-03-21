@@ -4,6 +4,9 @@ Status: User-facing guide
 Last updated: 2026-02-17  
 Audience: Operators setting up and running agents in Paperclip
 
+Note (2026-03-21): for the new runtime-bundle and tool-projection architecture, see `doc/spec/agent-runtime-surface.md`.
+This guide still describes the current operator-facing heartbeat runtime behavior.
+
 ## 1. What this system does
 
 Agents in Paperclip do not run continuously.  

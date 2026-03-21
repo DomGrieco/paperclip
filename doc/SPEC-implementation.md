@@ -11,6 +11,15 @@ Source inputs: `GOAL.md`, `PRODUCT.md`, `SPEC.md`, `DATABASE.md`, current monore
 This document is the concrete, build-ready V1 contract.
 When there is a conflict, `SPEC-implementation.md` controls V1 behavior.
 
+The next major architecture program is captured separately in:
+
+- `doc/spec/autonomous-enterprise-roadmap.md`
+- `doc/spec/feature-1-hierarchical-orchestration.md`
+- `doc/spec/agent-runtime-surface.md`
+
+Those docs define the post-V1 implementation direction.
+This document remains the baseline contract for the currently shipped/control-plane V1 surface.
+
 ## 2. V1 Outcomes
 
 Paperclip V1 must provide a full control-plane loop for autonomous agents:

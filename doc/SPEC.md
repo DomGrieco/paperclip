@@ -2,7 +2,67 @@
 
 Target specification for the Paperclip control plane. Living document — updated incrementally during spec interviews.
 
+Status: Long-horizon umbrella architecture
+Last updated: 2026-03-21
+Audience: Product, engineering, and operator-authors
+
+This document captures the full Paperclip direction.
+`doc/SPEC-implementation.md` remains the concrete build contract for the currently shipped V1 baseline.
+The next major implementation program is captured in the subsystem specs linked below.
+
 ---
+
+## 0. Program Direction (2026-03)
+
+Paperclip is evolving from a heartbeat-driven agent control plane into a control plane for autonomous companies that can plan, execute, verify, and ship work with durable evidence and human governance.
+
+### Primary target
+
+The primary target for the next program is an autonomous software company:
+
+- Paperclip owns the company model, work graph, policy, budgets, approvals, memory bindings, and evidence model.
+- Paperclip agents act as orchestrators.
+- Planner, worker, and verification execution happens as a first-class run graph inside Paperclip.
+- Coding runtimes are local-first and replaceable, with initial emphasis on `codex`, `cursor`, and `opencode`, and `pi` as the long-term canonical worker harness.
+
+### Extension layer
+
+Broader enterprise automation remains in scope for the umbrella architecture but is not the primary implementation target today.
+Examples include Google Workspace, business operations tooling, and non-software execution surfaces.
+Those capabilities should plug into the same control-plane model rather than requiring a separate architecture.
+
+### Program principles
+
+- local-first and self-hosted by default
+- Paperclip container is control plane, not sandbox
+- TDD is the default execution policy for software work
+- evidence policy is hierarchical and configurable
+- memory recall is scoped, provenance-rich, and auditable
+- runtime context is resolved centrally, then projected into tool-specific files for worker runtimes
+- new architecture work targets `codex`, `cursor`, `opencode`, and later `pi`
+- `claude` support is legacy/non-priority and should not shape the new design
+
+### Reference systems
+
+These projects are explicit reference inputs for the program:
+
+- [Longshot](https://github.com/Blastgits/longshot): swarm structure, planner/worker fan-out, delegation boundaries, reconciliation patterns
+- [OpenAI Symphony](https://github.com/openai/symphony): orchestration flow, proof-of-work review bundles, evaluator summaries, workpad-style execution discipline
+- [Pi coding agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent): long-term worker harness, session model, extensibility, tool surface
+- [PageIndex](https://github.com/VectifyAI/PageIndex): long-document retrieval and explainable knowledge recall
+- [Google Workspace CLI](https://github.com/googleworkspace/cli): later enterprise-automation connector surface
+- [OpenSandbox](https://github.com/alibaba/OpenSandbox): candidate sandbox backend for local-first execution runners
+- [autoresearch](https://github.com/karpathy/autoresearch) and [pi-autoresearch](https://github.com/davebcn87/pi-autoresearch): deferred self-improvement and R&D loops
+
+Paperclip should adopt principles from these systems without inheriting their full product scope by default.
+
+### Subsystem specs for the next implementation program
+
+- `doc/spec/autonomous-enterprise-roadmap.md`
+- `doc/spec/feature-1-hierarchical-orchestration.md`
+- `doc/spec/agent-runtime-surface.md`
+
+Where older draft sections in this document conflict with those subsystem specs, the newer subsystem specs control the next implementation direction.
 
 ## 1. Company Model [DRAFT]
 
