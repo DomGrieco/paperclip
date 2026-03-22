@@ -183,6 +183,8 @@ describe("run graph schema contract", () => {
     ]);
 
     expect(root.runType).toBe("planner");
+    expect(root.status).toBe("queued");
+    expect(root.parentRunId).toBeNull();
     expect(children).toHaveLength(2);
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
   }, 20_000);

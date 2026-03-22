@@ -22,7 +22,7 @@ type SpawnWorkerInput = {
   status?: HeartbeatRun["status"];
 };
 
-type WorkerGraphMetadata = Pick<HeartbeatRun, "runType" | "rootRunId" | "parentRunId" | "graphDepth"> & {
+type PlannerGraphMetadata = Pick<HeartbeatRun, "runType" | "rootRunId" | "parentRunId" | "graphDepth"> & {
   root: HeartbeatRunRow;
 };
 
@@ -87,7 +87,6 @@ export function issueRunGraphService(db: Db) {
     const existing = await findPlannerRoot(issue.id, issue.companyId);
     if (existing) return existing;
 
-    const now = new Date();
     const [inserted] = await db
       .insert(heartbeatRuns)
       .values({
@@ -95,9 +94,7 @@ export function issueRunGraphService(db: Db) {
         agentId,
         invocationSource: "assignment",
         triggerDetail: "system",
-        status: "succeeded",
-        startedAt: now,
-        finishedAt: now,
+        status: "queued",
         runType: "planner",
         rootRunId: null,
         parentRunId: null,
@@ -123,14 +120,14 @@ export function issueRunGraphService(db: Db) {
     return root;
   }
 
-  async function resolveWorkerGraph(issueId: string, agentId: string): Promise<WorkerGraphMetadata> {
+  async function resolvePlannerGraph(issueId: string, agentId: string): Promise<PlannerGraphMetadata> {
     const root = await startPlannerRoot(issueId, agentId);
     return {
       root,
-      runType: "worker",
+      runType: "planner",
       rootRunId: root.id,
-      parentRunId: root.id,
-      graphDepth: (root.graphDepth ?? 0) + 1,
+      parentRunId: null,
+      graphDepth: root.graphDepth ?? 0,
     };
   }
 
@@ -236,7 +233,7 @@ export function issueRunGraphService(db: Db) {
 
   return {
     getIssueSummary,
-    resolveWorkerGraph,
+    resolvePlannerGraph,
     spawnWorkers,
     startPlannerRoot,
   };

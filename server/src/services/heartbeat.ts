@@ -2614,10 +2614,10 @@ export function heartbeatService(db: Db) {
       payload,
     });
     const issueId = readNonEmptyString(enrichedContextSnapshot.issueId) ?? issueIdFromPayload;
-    const workerGraph = issueId ? await issueRunGraph.resolveWorkerGraph(issueId, agentId) : null;
 
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
+    const plannerGraph = issueId ? await issueRunGraph.resolvePlannerGraph(issueId, agentId) : null;
 
     const writeSkippedRequest = async (skipReason: string) => {
       await db.insert(agentWakeupRequests).values({
@@ -2821,9 +2821,9 @@ export function heartbeatService(db: Db) {
               requestedByActorId: opts.requestedByActorId ?? null,
               idempotencyKey: opts.idempotencyKey ?? null,
               runId: mergedRun.id,
-              rootRunId: workerGraph?.rootRunId ?? null,
-              parentRunId: workerGraph?.parentRunId ?? null,
-              targetRunType: workerGraph?.runType ?? null,
+              rootRunId: plannerGraph?.rootRunId ?? null,
+              parentRunId: plannerGraph?.parentRunId ?? null,
+              targetRunType: plannerGraph?.runType ?? null,
               finishedAt: new Date(),
             });
 
@@ -2888,9 +2888,9 @@ export function heartbeatService(db: Db) {
             requestedByActorType: opts.requestedByActorType ?? null,
             requestedByActorId: opts.requestedByActorId ?? null,
             idempotencyKey: opts.idempotencyKey ?? null,
-            rootRunId: workerGraph?.rootRunId ?? null,
-            parentRunId: workerGraph?.parentRunId ?? null,
-            targetRunType: workerGraph?.runType ?? null,
+            rootRunId: plannerGraph?.rootRunId ?? null,
+            parentRunId: plannerGraph?.parentRunId ?? null,
+            targetRunType: plannerGraph?.runType ?? null,
           });
 
           return { kind: "deferred" as const };
@@ -2909,9 +2909,9 @@ export function heartbeatService(db: Db) {
             requestedByActorType: opts.requestedByActorType ?? null,
             requestedByActorId: opts.requestedByActorId ?? null,
             idempotencyKey: opts.idempotencyKey ?? null,
-            rootRunId: workerGraph?.rootRunId ?? null,
-            parentRunId: workerGraph?.parentRunId ?? null,
-            targetRunType: workerGraph?.runType ?? null,
+            rootRunId: plannerGraph?.rootRunId ?? null,
+            parentRunId: plannerGraph?.parentRunId ?? null,
+            targetRunType: plannerGraph?.runType ?? null,
           })
           .returning()
           .then((rows) => rows[0]);
@@ -2927,10 +2927,10 @@ export function heartbeatService(db: Db) {
             wakeupRequestId: wakeupRequest.id,
             contextSnapshot: enrichedContextSnapshot,
             sessionIdBefore: sessionBefore,
-            runType: workerGraph?.runType ?? "worker",
-            rootRunId: workerGraph?.rootRunId ?? null,
-            parentRunId: workerGraph?.parentRunId ?? null,
-            graphDepth: workerGraph?.graphDepth ?? 0,
+            runType: plannerGraph?.runType ?? "worker",
+            rootRunId: plannerGraph?.rootRunId ?? null,
+            parentRunId: plannerGraph?.parentRunId ?? null,
+            graphDepth: plannerGraph?.graphDepth ?? 0,
           })
           .returning()
           .then((rows) => rows[0]);
@@ -3023,9 +3023,9 @@ export function heartbeatService(db: Db) {
         requestedByActorId: opts.requestedByActorId ?? null,
         idempotencyKey: opts.idempotencyKey ?? null,
         runId: mergedRun.id,
-        rootRunId: workerGraph?.rootRunId ?? null,
-        parentRunId: workerGraph?.parentRunId ?? null,
-        targetRunType: workerGraph?.runType ?? null,
+        rootRunId: plannerGraph?.rootRunId ?? null,
+        parentRunId: plannerGraph?.parentRunId ?? null,
+        targetRunType: plannerGraph?.runType ?? null,
         finishedAt: new Date(),
       });
       return mergedRun;
@@ -3044,9 +3044,9 @@ export function heartbeatService(db: Db) {
         requestedByActorType: opts.requestedByActorType ?? null,
         requestedByActorId: opts.requestedByActorId ?? null,
         idempotencyKey: opts.idempotencyKey ?? null,
-        rootRunId: workerGraph?.rootRunId ?? null,
-        parentRunId: workerGraph?.parentRunId ?? null,
-        targetRunType: workerGraph?.runType ?? null,
+        rootRunId: plannerGraph?.rootRunId ?? null,
+        parentRunId: plannerGraph?.parentRunId ?? null,
+        targetRunType: plannerGraph?.runType ?? null,
       })
       .returning()
       .then((rows) => rows[0]);
@@ -3064,10 +3064,10 @@ export function heartbeatService(db: Db) {
         wakeupRequestId: wakeupRequest.id,
         contextSnapshot: enrichedContextSnapshot,
         sessionIdBefore: sessionBefore,
-        runType: workerGraph?.runType ?? "worker",
-        rootRunId: workerGraph?.rootRunId ?? null,
-        parentRunId: workerGraph?.parentRunId ?? null,
-        graphDepth: workerGraph?.graphDepth ?? 0,
+        runType: plannerGraph?.runType ?? "worker",
+        rootRunId: plannerGraph?.rootRunId ?? null,
+        parentRunId: plannerGraph?.parentRunId ?? null,
+        graphDepth: plannerGraph?.graphDepth ?? 0,
       })
       .returning()
       .then((rows) => rows[0]);

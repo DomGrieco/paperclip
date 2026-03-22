@@ -11,6 +11,7 @@ import {
   companies,
   createDb,
   ensurePostgresDatabase,
+  heartbeatRuns,
   issues,
 } from "@paperclipai/db";
 import { heartbeatService } from "../services/heartbeat.js";
@@ -147,7 +148,7 @@ describe("shouldWakeAssigneeOnCheckout", () => {
 });
 
 describe("issue checkout wakeups", () => {
-  it("reuses the planner root when checkout wakeups spawn worker runs", async () => {
+  it("reuses the planner root when checkout wakeups queue planner runs", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
@@ -183,9 +184,9 @@ describe("issue checkout wakeups", () => {
     });
 
     expect(run).not.toBeNull();
-    expect(run?.runType).toBe("worker");
+    expect(run?.runType).toBe("planner");
     expect(run?.rootRunId).toBe(root.id);
-    expect(run?.parentRunId).toBe(root.id);
+    expect(run?.parentRunId).toBeNull();
 
     const wakeup = await db
       .select()
@@ -194,7 +195,40 @@ describe("issue checkout wakeups", () => {
       .then((rows) => rows[0] ?? null);
 
     expect(wakeup?.rootRunId).toBe(root.id);
-    expect(wakeup?.parentRunId).toBe(root.id);
-    expect(wakeup?.targetRunType).toBe("worker");
+    expect(wakeup?.parentRunId).toBeNull();
+    expect(wakeup?.targetRunType).toBe("planner");
+  }, 20_000);
+
+  it("does not persist a planner root when wakeup agent validation fails", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Do not create orphan planner roots",
+      status: "in_progress",
+      priority: "high",
+    }).returning();
+
+    await expect(
+      heartbeat.wakeup("00000000-0000-0000-0000-000000000000", {
+        source: "assignment",
+        triggerDetail: "system",
+        reason: "issue_checked_out",
+        payload: { issueId: issue.id, mutation: "checkout" },
+        contextSnapshot: { issueId: issue.id, source: "issue.checkout" },
+      }),
+    ).rejects.toThrow("Agent not found");
+
+    const plannerRuns = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.companyId, company.id));
+
+    expect(plannerRuns).toHaveLength(0);
   }, 20_000);
 });
