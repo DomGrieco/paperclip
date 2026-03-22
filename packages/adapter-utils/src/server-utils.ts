@@ -235,6 +235,23 @@ export function ensurePathInEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return { ...env, PATH: defaultPathForPlatform() };
 }
 
+export function resolveExecutionCwd(input: {
+  workspaceCwd?: string | null;
+  configuredCwd?: string | null;
+  defaultCwd?: string | null;
+}): string {
+  const workspaceCwd = input.workspaceCwd?.trim() ?? "";
+  if (workspaceCwd) return workspaceCwd;
+
+  const configuredCwd = input.configuredCwd?.trim() ?? "";
+  if (configuredCwd) return configuredCwd;
+
+  const defaultCwd = input.defaultCwd?.trim() ?? "";
+  if (defaultCwd) return defaultCwd;
+
+  return process.cwd();
+}
+
 export async function ensureAbsoluteDirectory(
   cwd: string,
   opts: { createIfMissing?: boolean } = {},
