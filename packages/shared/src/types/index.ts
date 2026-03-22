@@ -91,6 +91,7 @@ export type {
   RuntimeBundlePolicy,
   RuntimeBundleMemorySnippet,
   RuntimeBundleMemoryPacket,
+  RuntimeBundleRunner,
   RuntimeBundleProjection,
   RuntimeBundle,
   IssueEvidenceBundle,

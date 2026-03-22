@@ -44,6 +44,7 @@ import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
+import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   gateProjectExecutionWorkspacePolicy,
@@ -2337,7 +2338,7 @@ export function heartbeatService(db: Db) {
         resultJson: adapterResult.resultJson ?? null,
         verificationVerdict:
           run.runType === "verification" ? readAdapterVerificationVerdict(adapterResult.verificationVerdict) : null,
-        runnerSnapshotJson: (runtimeBundle?.runner as Record<string, unknown> | null | undefined) ?? null,
+        runnerSnapshotJson: (resolveObservedRunnerSnapshot({ planned: runtimeBundle?.runner ?? { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" }, runtimeServices }) as unknown as Record<string, unknown> | null | undefined) ?? null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,
         stderrExcerpt,

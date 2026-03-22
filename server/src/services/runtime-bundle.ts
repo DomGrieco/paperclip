@@ -3,6 +3,7 @@ import type { Db } from "@paperclipai/db";
 import { agents, companies, issues, projects } from "@paperclipai/db";
 import type { RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
+import { resolvePlannedRunnerSnapshot } from "./runner-plane.js";
 
 type ResolveRuntimeBundleInput = {
   companyId: string;
@@ -25,51 +26,6 @@ export function buildRuntimeBundleProjection(runtime: RuntimeBundleTarget): Runt
     contextKey: "paperclipRuntimeBundle",
     envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON",
     materializationRoot: ".paperclip/runtime",
-  };
-}
-
-function deriveRunnerBundle(projectPolicy: Record<string, unknown> | null): RuntimeBundle["runner"] {
-  const workspaceStrategy =
-    projectPolicy && typeof projectPolicy.workspaceStrategy === "object" && projectPolicy.workspaceStrategy
-      ? (projectPolicy.workspaceStrategy as Record<string, unknown>)
-      : null;
-  const defaultMode =
-    projectPolicy && typeof projectPolicy.defaultMode === "string" ? (projectPolicy.defaultMode as string) : null;
-  const strategyType =
-    workspaceStrategy && typeof workspaceStrategy.type === "string" ? (workspaceStrategy.type as string) : null;
-
-  if (strategyType === "cloud_sandbox") {
-    return {
-      target: "cloud_sandbox",
-      provider: "cloud_sandbox",
-      workspaceStrategyType: strategyType,
-      executionMode: defaultMode,
-      browserCapable: true,
-      sandboxed: true,
-      isolationBoundary: "cloud_sandbox",
-    };
-  }
-
-  if (strategyType === "adapter_managed") {
-    return {
-      target: "adapter_managed",
-      provider: "adapter_managed",
-      workspaceStrategyType: strategyType,
-      executionMode: defaultMode,
-      browserCapable: false,
-      sandboxed: true,
-      isolationBoundary: "adapter_runtime",
-    };
-  }
-
-  return {
-    target: "local_host",
-    provider: "local_process",
-    workspaceStrategyType: strategyType,
-    executionMode: defaultMode,
-    browserCapable: false,
-    sandboxed: false,
-    isolationBoundary: "host_process",
   };
 }
 
@@ -167,7 +123,7 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       evidencePolicy: issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"],
       evidencePolicySource: issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"],
     },
-    runner: deriveRunnerBundle(project?.executionWorkspacePolicy ?? null),
+    runner: resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null),
     memory: {
       snippets: [
         ...(company?.description
