@@ -14,6 +14,62 @@ export interface OrchestrationPolicySnapshot {
   [key: string]: unknown;
 }
 
+export type RuntimeBundleTarget = "codex" | "cursor" | "opencode";
+export type RuntimeBundleTddMode = "required";
+
+export interface RuntimeBundlePolicy {
+  tddMode: RuntimeBundleTddMode;
+  evidencePolicy: EvidencePolicy;
+  evidencePolicySource: EvidencePolicySource;
+}
+
+export interface RuntimeBundleMemorySnippet {
+  scope: "company" | "agent" | "project" | "issue" | "run";
+  source: string;
+  content: string;
+}
+
+export interface RuntimeBundleMemoryPacket {
+  snippets: RuntimeBundleMemorySnippet[];
+}
+
+export interface RuntimeBundleProjection {
+  runtime: RuntimeBundleTarget;
+  contextKey: string;
+  envVar: string;
+  materializationRoot: string;
+}
+
+export interface RuntimeBundle {
+  runtime: RuntimeBundleTarget;
+  company: {
+    id: string;
+  };
+  agent: {
+    id: string;
+    name: string;
+    adapterType: string | null;
+  };
+  project: {
+    id: string;
+    name: string;
+    executionWorkspacePolicy: Record<string, unknown> | null;
+  } | null;
+  issue: {
+    id: string;
+    identifier: string | null;
+    title: string;
+    status: string;
+    priority: string;
+  } | null;
+  run: {
+    id: string | null;
+  };
+  policy: RuntimeBundlePolicy;
+  memory: RuntimeBundleMemoryPacket;
+  projection: RuntimeBundleProjection;
+}
+
 export interface HeartbeatRunArtifact {
   id: string;
   companyId: string;

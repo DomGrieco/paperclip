@@ -4,7 +4,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import type { BillingType } from "@paperclipai/shared";
+import type { BillingType, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -43,6 +43,7 @@ import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
+import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   gateProjectExecutionWorkspacePolicy,
@@ -74,6 +75,29 @@ const SESSIONED_LOCAL_ADAPTERS = new Set([
   "opencode_local",
   "pi_local",
 ]);
+
+export function resolveRuntimeBundleTargetForAgent(adapterType: string | null | undefined): RuntimeBundleTarget | null {
+  return resolveRuntimeBundleTarget(adapterType);
+}
+
+export function attachRuntimeBundleToContext(
+  contextSnapshot: Record<string, unknown>,
+  runtimeBundle: RuntimeBundle | null,
+) {
+  if (!runtimeBundle) {
+    delete contextSnapshot.paperclipRuntimeBundle;
+    delete contextSnapshot.paperclipRuntimeProjection;
+    delete contextSnapshot.paperclipPolicy;
+    delete contextSnapshot.paperclipMemoryRecall;
+    return contextSnapshot;
+  }
+
+  contextSnapshot.paperclipRuntimeBundle = runtimeBundle;
+  contextSnapshot.paperclipRuntimeProjection = runtimeBundle.projection;
+  contextSnapshot.paperclipPolicy = runtimeBundle.policy;
+  contextSnapshot.paperclipMemoryRecall = runtimeBundle.memory;
+  return contextSnapshot;
+}
 
 function deriveRepoNameFromRepoUrl(repoUrl: string | null): string | null {
   const trimmed = repoUrl?.trim() ?? "";
@@ -1931,6 +1955,19 @@ export function heartbeatService(db: Db) {
     if (executionWorkspace.projectId && !readNonEmptyString(context.projectId)) {
       context.projectId = executionWorkspace.projectId;
     }
+    const runtimeBundleTarget =
+      issueId ? resolveRuntimeBundleTargetForAgent(agent.adapterType) : null;
+    const runtimeBundle =
+      runtimeBundleTarget && issueId
+        ? await resolveRuntimeBundle(db, {
+            companyId: agent.companyId,
+            issueId,
+            agentId: agent.id,
+            runId: run.id,
+            runtime: runtimeBundleTarget,
+          })
+        : null;
+    attachRuntimeBundleToContext(context, runtimeBundle);
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       taskSessionForRun?.sessionDisplayId ??

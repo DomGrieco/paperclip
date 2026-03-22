@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { agents } from "@paperclipai/db";
 import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import {
+  attachRuntimeBundleToContext,
   formatRuntimeWorkspaceWarningLog,
   prioritizeProjectWorkspaceCandidatesForRun,
   parseSessionCompactionPolicy,
+  resolveRuntimeBundleTargetForAgent,
   resolveRuntimeSessionParamsForWorkspace,
   shouldResetTaskSessionForWake,
   type ResolvedWorkspaceForRun,
 } from "../services/heartbeat.ts";
+import type { RuntimeBundle } from "@paperclipai/shared";
 
 function buildResolvedWorkspace(overrides: Partial<ResolvedWorkspaceForRun> = {}): ResolvedWorkspaceForRun {
   return {
@@ -275,6 +278,60 @@ describe("parseSessionCompactionPolicy", () => {
       maxSessionRuns: 25,
       maxRawInputTokens: 500_000,
       maxSessionAgeHours: 0,
+    });
+  });
+});
+
+describe("resolveRuntimeBundleTargetForAgent", () => {
+  it("maps the supported local coding adapters to runtime bundle targets", () => {
+    expect(resolveRuntimeBundleTargetForAgent("codex_local")).toBe("codex");
+    expect(resolveRuntimeBundleTargetForAgent("cursor")).toBe("cursor");
+    expect(resolveRuntimeBundleTargetForAgent("opencode_local")).toBe("opencode");
+  });
+
+  it("returns null for adapters without feature1 runtime bundle projections", () => {
+    expect(resolveRuntimeBundleTargetForAgent("process")).toBeNull();
+    expect(resolveRuntimeBundleTargetForAgent("claude_local")).toBeNull();
+  });
+});
+
+describe("attachRuntimeBundleToContext", () => {
+  it("delivers the resolved runtime bundle into the heartbeat context", () => {
+    const bundle: RuntimeBundle = {
+      runtime: "codex",
+      company: { id: "company-1" },
+      agent: { id: "agent-1", name: "Agent", adapterType: "codex_local" },
+      project: { id: "project-1", name: "Project", executionWorkspacePolicy: null },
+      issue: {
+        id: "issue-1",
+        identifier: "TST-1",
+        title: "Implement runtime bundle",
+        status: "in_progress",
+        priority: "high",
+      },
+      run: { id: "run-1" },
+      policy: {
+        tddMode: "required",
+        evidencePolicy: "code_ci_evaluator_summary",
+        evidencePolicySource: "company_default",
+      },
+      memory: {
+        snippets: [],
+      },
+      projection: {
+        runtime: "codex",
+        contextKey: "paperclipRuntimeBundle",
+        envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON",
+        materializationRoot: ".paperclip/runtime",
+      },
+    };
+
+    expect(attachRuntimeBundleToContext({ issueId: "issue-1" }, bundle)).toMatchObject({
+      issueId: "issue-1",
+      paperclipRuntimeBundle: bundle,
+      paperclipRuntimeProjection: bundle.projection,
+      paperclipPolicy: bundle.policy,
+      paperclipMemoryRecall: bundle.memory,
     });
   });
 });

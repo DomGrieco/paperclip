@@ -6,6 +6,7 @@ export { projectService } from "./projects.js";
 export { issueService, type IssueFilters } from "./issues.js";
 export { issueRunGraphService } from "./issue-run-graph.js";
 export { issueRunEvidenceService } from "./issue-run-evidence.js";
+export { resolveRuntimeBundle, resolveRuntimeBundleTarget, buildRuntimeBundleProjection } from "./runtime-bundle.js";
 export { issueApprovalService } from "./issue-approvals.js";
 export { goalService } from "./goals.js";
 export { activityService, type ActivityFilters } from "./activity.js";

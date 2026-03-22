@@ -9,7 +9,15 @@ import type {
   WakeupTriggerDetail,
   WakeupRequestStatus,
 } from "../constants.js";
-import type { OrchestrationArtifactBundle, OrchestrationPolicySnapshot } from "./orchestration.js";
+import type {
+  OrchestrationArtifactBundle,
+  OrchestrationPolicySnapshot,
+  RuntimeBundle,
+} from "./orchestration.js";
+
+export interface HeartbeatContextSnapshot extends Record<string, unknown> {
+  paperclipRuntimeBundle?: RuntimeBundle | null;
+}
 
 export interface HeartbeatRun {
   id: string;
@@ -37,7 +45,7 @@ export interface HeartbeatRun {
   stderrExcerpt: string | null;
   errorCode: string | null;
   externalRunId: string | null;
-  contextSnapshot: Record<string, unknown> | null;
+  contextSnapshot: HeartbeatContextSnapshot | null;
   runType: HeartbeatRunType;
   rootRunId: string | null;
   parentRunId: string | null;
