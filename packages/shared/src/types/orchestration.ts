@@ -26,11 +26,25 @@ export interface RuntimeBundlePolicy {
 export interface RuntimeBundleMemorySnippet {
   scope: "company" | "agent" | "project" | "issue" | "run";
   source: string;
+  sourceId?: string | null;
   content: string;
+  freshness?: "static" | "recent" | "live" | null;
+  updatedAt?: string | null;
+  rank?: number | null;
 }
 
 export interface RuntimeBundleMemoryPacket {
   snippets: RuntimeBundleMemorySnippet[];
+}
+
+export interface RuntimeBundleRunner {
+  target: "local_host" | "adapter_managed" | "cloud_sandbox";
+  provider: "local_process" | "adapter_managed" | "cloud_sandbox";
+  workspaceStrategyType: string | null;
+  executionMode: string | null;
+  browserCapable: boolean;
+  sandboxed: boolean;
+  isolationBoundary: "host_process" | "adapter_runtime" | "cloud_sandbox";
 }
 
 export interface RuntimeBundleProjection {
@@ -66,6 +80,7 @@ export interface RuntimeBundle {
     id: string | null;
   };
   policy: RuntimeBundlePolicy;
+  runner: RuntimeBundleRunner;
   memory: RuntimeBundleMemoryPacket;
   projection: RuntimeBundleProjection;
 }

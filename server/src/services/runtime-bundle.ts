@@ -28,6 +28,51 @@ export function buildRuntimeBundleProjection(runtime: RuntimeBundleTarget): Runt
   };
 }
 
+function deriveRunnerBundle(projectPolicy: Record<string, unknown> | null): RuntimeBundle["runner"] {
+  const workspaceStrategy =
+    projectPolicy && typeof projectPolicy.workspaceStrategy === "object" && projectPolicy.workspaceStrategy
+      ? (projectPolicy.workspaceStrategy as Record<string, unknown>)
+      : null;
+  const defaultMode =
+    projectPolicy && typeof projectPolicy.defaultMode === "string" ? (projectPolicy.defaultMode as string) : null;
+  const strategyType =
+    workspaceStrategy && typeof workspaceStrategy.type === "string" ? (workspaceStrategy.type as string) : null;
+
+  if (strategyType === "cloud_sandbox") {
+    return {
+      target: "cloud_sandbox",
+      provider: "cloud_sandbox",
+      workspaceStrategyType: strategyType,
+      executionMode: defaultMode,
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "cloud_sandbox",
+    };
+  }
+
+  if (strategyType === "adapter_managed") {
+    return {
+      target: "adapter_managed",
+      provider: "adapter_managed",
+      workspaceStrategyType: strategyType,
+      executionMode: defaultMode,
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "adapter_runtime",
+    };
+  }
+
+  return {
+    target: "local_host",
+    provider: "local_process",
+    workspaceStrategyType: strategyType,
+    executionMode: defaultMode,
+    browserCapable: false,
+    sandboxed: false,
+    isolationBoundary: "host_process",
+  };
+}
+
 export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleInput): Promise<RuntimeBundle> {
   const [agent, issue] = await Promise.all([
     db
@@ -50,6 +95,8 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         description: issues.description,
         status: issues.status,
         priority: issues.priority,
+        createdAt: issues.createdAt,
+        updatedAt: issues.updatedAt,
         evidencePolicy: issues.evidencePolicy,
         evidencePolicySource: issues.evidencePolicySource,
       })
@@ -105,13 +152,18 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       evidencePolicy: issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"],
       evidencePolicySource: issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"],
     },
+    runner: deriveRunnerBundle(project?.executionWorkspacePolicy ?? null),
     memory: {
       snippets: issue.description
         ? [
             {
               scope: "issue",
               source: "issue.description",
+              sourceId: issue.id,
               content: issue.description,
+              freshness: "static",
+              updatedAt: new Date(issue.updatedAt ?? issue.createdAt).toISOString(),
+              rank: 1,
             },
           ]
         : [],

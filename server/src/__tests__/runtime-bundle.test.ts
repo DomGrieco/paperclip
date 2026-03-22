@@ -111,6 +111,7 @@ describe("resolveRuntimeBundle", () => {
       status: "in_progress",
       executionWorkspacePolicy: {
         defaultMode: "isolated_workspace",
+        workspaceStrategy: { type: "git_worktree" },
       },
     }).returning();
     const [agent] = await db.insert(agents).values({
@@ -145,7 +146,26 @@ describe("resolveRuntimeBundle", () => {
     expect(bundle.project?.id).toBe(project.id);
     expect(bundle.policy.tddMode).toBe("required");
     expect(bundle.policy.evidencePolicy).toBe("code_ci_evaluator_summary");
-    expect(bundle.memory.snippets.length).toBeGreaterThanOrEqual(0);
+    expect(bundle.runner).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
+    expect(bundle.memory.snippets).toEqual([
+      {
+        scope: "issue",
+        source: "issue.description",
+        sourceId: issue.id,
+        content: "Remember the issue operating context.",
+        freshness: "static",
+        updatedAt: expect.any(String),
+        rank: 1,
+      },
+    ]);
     expect(bundle.projection.runtime).toBe("codex");
   }, 20_000);
 
@@ -188,11 +208,24 @@ describe("resolveRuntimeBundle", () => {
       evidencePolicy: "code_ci_evaluator_summary_artifacts",
       evidencePolicySource: "issue_override",
     });
+    expect(bundle.runner).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: null,
+      executionMode: null,
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
     expect(bundle.memory.snippets).toEqual([
       {
         scope: "issue",
         source: "issue.description",
+        sourceId: issue.id,
         content: "The worker should see the strict evidence policy.",
+        freshness: "static",
+        updatedAt: expect.any(String),
+        rank: 1,
       },
     ]);
   }, 20_000);
