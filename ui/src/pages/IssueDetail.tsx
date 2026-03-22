@@ -19,6 +19,7 @@ import { InlineEditor } from "../components/InlineEditor";
 import { CommentThread } from "../components/CommentThread";
 import { IssueDocumentsSection } from "../components/IssueDocumentsSection";
 import { IssueProperties } from "../components/IssueProperties";
+import { IssueRunGraphCard } from "../components/IssueRunGraphCard";
 import { LiveRunWidget } from "../components/LiveRunWidget";
 import type { MentionOption } from "../components/MarkdownEditor";
 import { ScrollToBottom } from "../components/ScrollToBottom";
@@ -239,6 +240,13 @@ export function IssueDetail() {
     refetchInterval: 5000,
   });
 
+  const { data: orchestration } = useQuery({
+    queryKey: queryKeys.issues.runGraph(issueId!),
+    queryFn: () => heartbeatsApi.runGraphForIssue(issueId!),
+    enabled: !!issueId,
+    refetchInterval: 5000,
+  });
+
   const { data: linkedApprovals } = useQuery({
     queryKey: queryKeys.issues.approvals(issueId!),
     queryFn: () => issuesApi.listApprovals(issueId!),
@@ -266,6 +274,7 @@ export function IssueDetail() {
   });
 
   const hasLiveRuns = (liveRuns ?? []).length > 0 || !!activeRun;
+  const effectiveOrchestration = orchestration ?? issue?.orchestration ?? null;
   const sourceBreadcrumb = useMemo(
     () => readIssueDetailBreadcrumb(location.state) ?? { label: "Issues", href: "/issues" },
     [location.state],
@@ -279,6 +288,20 @@ export function IssueDetail() {
     if (liveIds.size === 0) return linkedRuns ?? [];
     return (linkedRuns ?? []).filter((r) => !liveIds.has(r.runId));
   }, [linkedRuns, liveRuns, activeRun]);
+
+  const orchestrationRunLinks = useMemo(() => {
+    const links = new Map<string, string>();
+    for (const run of linkedRuns ?? []) {
+      links.set(run.runId, `/agents/${run.agentId}/runs/${run.runId}`);
+    }
+    for (const run of liveRuns ?? []) {
+      links.set(run.id, `/agents/${run.agentId}/runs/${run.id}`);
+    }
+    if (activeRun) {
+      links.set(activeRun.id, `/agents/${activeRun.agentId}/runs/${activeRun.id}`);
+    }
+    return links;
+  }, [activeRun, linkedRuns, liveRuns]);
 
   const { data: allIssues } = useQuery({
     queryKey: queryKeys.issues.list(selectedCompanyId!),
@@ -447,6 +470,7 @@ export function IssueDetail() {
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.activity(issueId!) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.runs(issueId!) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.approvals(issueId!) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.issues.runGraph(issueId!) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.attachments(issueId!) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.documents(issueId!) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.liveRuns(issueId!) });
@@ -886,6 +910,8 @@ export function IssueDetail() {
         itemClassName="rounded-lg border border-border p-3"
         missingBehavior="placeholder"
       />
+
+      <IssueRunGraphCard orchestration={effectiveOrchestration} runLinks={orchestrationRunLinks} />
 
       <IssueDocumentsSection
         issue={issue}

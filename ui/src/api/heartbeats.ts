@@ -2,6 +2,7 @@ import type {
   HeartbeatRun,
   HeartbeatRunEvent,
   InstanceSchedulerHeartbeatAgent,
+  IssueOrchestrationSummary,
   WorkspaceOperation,
 } from "@paperclipai/shared";
 import { api } from "./client";
@@ -54,6 +55,8 @@ export const heartbeatsApi = {
     api.get<LiveRunForIssue[]>(`/issues/${issueId}/live-runs`),
   activeRunForIssue: (issueId: string) =>
     api.get<ActiveRunForIssue | null>(`/issues/${issueId}/active-run`),
+  runGraphForIssue: (issueId: string) =>
+    api.get<IssueOrchestrationSummary>(`/issues/${issueId}/run-graph`),
   liveRunsForCompany: (companyId: string, minCount?: number) =>
     api.get<LiveRunForIssue[]>(`/companies/${companyId}/live-runs${minCount ? `?minCount=${minCount}` : ""}`),
   listInstanceSchedulerAgents: () =>
