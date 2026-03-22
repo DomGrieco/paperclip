@@ -148,4 +148,52 @@ describe("resolveRuntimeBundle", () => {
     expect(bundle.memory.snippets.length).toBeGreaterThanOrEqual(0);
     expect(bundle.projection.runtime).toBe("codex");
   }, 20_000);
+
+  it("carries issue-level evidence policy overrides into the runtime bundle policy block", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "opencode_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Respect evidence override",
+      description: "The worker should see the strict evidence policy.",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+      evidencePolicy: "code_ci_evaluator_summary_artifacts",
+      evidencePolicySource: "issue_override",
+    }).returning();
+
+    const bundle = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runtime: "opencode",
+    });
+
+    expect(bundle.policy).toEqual({
+      tddMode: "required",
+      evidencePolicy: "code_ci_evaluator_summary_artifacts",
+      evidencePolicySource: "issue_override",
+    });
+    expect(bundle.memory.snippets).toEqual([
+      {
+        scope: "issue",
+        source: "issue.description",
+        content: "The worker should see the strict evidence policy.",
+      },
+    ]);
+  }, 20_000);
 });

@@ -231,4 +231,171 @@ describe("issue checkout wakeups", () => {
 
     expect(plannerRuns).toHaveLength(0);
   }, 20_000);
+
+  it("does not persist a planner root when a budget block rejects the wakeup", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db
+      .insert(agents)
+      .values({
+        companyId: company.id,
+        name: "Blocked worker",
+        role: "engineer",
+        adapterType: "codex_local",
+        adapterConfig: {},
+        runtimeConfig: {},
+        permissions: {},
+        status: "paused",
+        pauseReason: "budget",
+      })
+      .returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Budget block should not create planner root",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    await expect(
+      heartbeat.wakeup(agent.id, {
+        source: "assignment",
+        triggerDetail: "system",
+        reason: "issue_checked_out",
+        payload: { issueId: issue.id, mutation: "checkout" },
+        contextSnapshot: { issueId: issue.id, source: "issue.checkout" },
+      }),
+    ).rejects.toThrow("budget hard-stop");
+
+    const plannerRuns = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.companyId, company.id));
+
+    expect(plannerRuns).toHaveLength(0);
+  }, 20_000);
+
+  it("does not persist a planner root when timer wakeups are disabled", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db
+      .insert(agents)
+      .values({
+        companyId: company.id,
+        name: "Disabled worker",
+        role: "engineer",
+        adapterType: "codex_local",
+        adapterConfig: {},
+        runtimeConfig: {
+          heartbeat: {
+            enabled: false,
+          },
+        },
+        permissions: {},
+      })
+      .returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Disabled timer should not create planner root",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const run = await heartbeat.wakeup(agent.id, {
+      source: "timer",
+      triggerDetail: "schedule",
+      reason: "issue_checked_out",
+      payload: { issueId: issue.id, mutation: "checkout" },
+      contextSnapshot: { issueId: issue.id, source: "issue.checkout" },
+    });
+
+    expect(run).toBeNull();
+
+    const plannerRuns = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.companyId, company.id));
+
+    expect(plannerRuns).toHaveLength(0);
+  }, 20_000);
+
+  it("preserves the run graph when budget pause cancels the active worker run", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Budget pause keeps orchestration history",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "running",
+      startedAt: new Date("2026-03-22T13:10:00.000Z"),
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      contextSnapshot: {
+        issueId: issue.id,
+        taskKey: "worker-a",
+      },
+    }).returning();
+
+    await heartbeat.cancelBudgetScopeWork({
+      companyId: company.id,
+      scopeType: "agent",
+      scopeId: agent.id,
+    });
+
+    const summary = await graph.getIssueSummary(issue.id);
+    const cancelledWorker = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, worker.id))
+      .then((rows) => rows[0] ?? null);
+
+    expect(cancelledWorker?.status).toBe("cancelled");
+    expect(cancelledWorker?.parentRunId).toBe(planner.id);
+    expect(summary.rootRunId).toBe(planner.id);
+    expect(summary.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: planner.id, runType: "planner" }),
+        expect.objectContaining({ id: worker.id, runType: "worker", status: "cancelled" }),
+      ]),
+    );
+  }, 20_000);
 });

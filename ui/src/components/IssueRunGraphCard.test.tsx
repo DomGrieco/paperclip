@@ -1,9 +1,17 @@
 // @vitest-environment node
 
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { IssueEvidenceBundle, IssueOrchestrationSummary } from "@paperclipai/shared";
 import { IssueEvidenceBundleCard, IssueRunGraphCard } from "./IssueRunGraphCard";
+import { vi } from "vitest";
+
+vi.mock("@/context/CompanyContext", () => ({
+  useCompany: () => ({
+    selectedCompany: { issuePrefix: "TST" },
+  }),
+}));
 
 const orchestration: IssueOrchestrationSummary = {
   rootRunId: "run-plan",
@@ -76,14 +84,23 @@ const evidence: IssueEvidenceBundle = {
 describe("IssueRunGraphCard", () => {
   it("renders run graph nodes, readiness, and repair metadata", () => {
     const html = renderToStaticMarkup(
-      <IssueRunGraphCard
-        orchestration={orchestration}
-        runLinks={new Map([
-          ["run-plan", "/agents/agent-plan/runs/run-plan"],
-          ["run-work", "/agents/agent-work/runs/run-work"],
-          ["run-verify", "/agents/agent-verify/runs/run-verify"],
-        ])}
-      />,
+      <MemoryRouter initialEntries={["/TST/issues/issue-1"]}>
+        <Routes>
+          <Route
+            path="/:companyPrefix/issues/:issueId"
+            element={
+              <IssueRunGraphCard
+                orchestration={orchestration}
+                runLinks={new Map([
+                  ["run-plan", "/agents/agent-plan/runs/run-plan"],
+                  ["run-work", "/agents/agent-work/runs/run-work"],
+                  ["run-verify", "/agents/agent-verify/runs/run-verify"],
+                ])}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
     );
 
     expect(html).toContain("Orchestration");
@@ -92,21 +109,31 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Worker");
     expect(html).toContain("Verification");
     expect(html).toContain("Repair 1");
-    expect(html).toContain("/agents/agent-verify/runs/run-verify");
+    expect(html).toContain("/TST/agents/agent-plan/runs/run-plan");
+    expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
   });
 
   it("renders evaluator summary and artifact evidence details", () => {
     const html = renderToStaticMarkup(
-      <IssueEvidenceBundleCard
-        evidenceBundle={evidence}
-        verificationRunHref="/agents/agent-verify/runs/run-verify"
-      />,
+      <MemoryRouter initialEntries={["/TST/issues/issue-1"]}>
+        <Routes>
+          <Route
+            path="/:companyPrefix/issues/:issueId"
+            element={
+              <IssueEvidenceBundleCard
+                evidenceBundle={evidence}
+                verificationRunHref="/agents/agent-verify/runs/run-verify"
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
     );
 
     expect(html).toContain("Review Bundle");
     expect(html).toContain("CI passed and review notes attached.");
     expect(html).toContain("artifacts/screenshot.png");
     expect(html).toContain("artifacts/logs.zip");
-    expect(html).toContain("/agents/agent-verify/runs/run-verify");
+    expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
   });
 });

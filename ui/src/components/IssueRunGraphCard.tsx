@@ -2,6 +2,7 @@ import type { IssueOrchestrationSummary } from "@paperclipai/shared";
 import { GitBranchPlus, ShieldCheck, Wrench } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateTime } from "../lib/utils";
+import { Link } from "../lib/router";
 import { IssueEvidenceBundleCard } from "./IssueEvidenceBundle";
 
 function humanize(value: string) {
@@ -143,9 +144,9 @@ export function IssueRunGraphCard({
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-mono">{node.id.slice(0, 8)}</span>
                       {runHref ? (
-                        <a href={runHref} className="text-cyan-700 hover:underline dark:text-cyan-300">
+                        <Link to={runHref} className="text-cyan-700 hover:underline dark:text-cyan-300">
                           Open run
-                        </a>
+                        </Link>
                       ) : null}
                       {node.parentRunId ? <span>Parent {node.parentRunId.slice(0, 8)}</span> : <span>Root run</span>}
                     </div>

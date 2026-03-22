@@ -429,4 +429,68 @@ describe("run graph schema contract", () => {
     expect(retryWorker).toBeNull();
     expect(workers).toHaveLength(1);
   }, 20_000);
+
+  it("rebuilds the persisted graph after a runner-lost worker failure", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Recover run graph after restart",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "failed",
+      errorCode: "runner_lost",
+      error: "Runner process disappeared before completion",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      contextSnapshot: {
+        issueId: issue.id,
+        taskKey: "worker-a",
+      },
+    });
+
+    const recovered = issueRunGraphService(db);
+    const summary = await recovered.getIssueSummary(issue.id);
+
+    expect(summary.rootRunId).toBe(planner.id);
+    expect(summary.nodes).toEqual([
+      expect.objectContaining({
+        id: planner.id,
+        runType: "planner",
+        status: "queued",
+      }),
+      expect.objectContaining({
+        runType: "worker",
+        status: "failed",
+        parentRunId: planner.id,
+        rootRunId: planner.id,
+      }),
+    ]);
+  }, 20_000);
 });

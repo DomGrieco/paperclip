@@ -3,6 +3,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import {
   agents,
   applyPendingMigrations,
@@ -14,6 +15,7 @@ import {
   issues,
 } from "@paperclipai/db";
 import { issueRunGraphService } from "../services/issue-run-graph.js";
+import { issueRunEvidenceService } from "../services/issue-run-evidence.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -105,6 +107,7 @@ describe("issue run evidence", () => {
 
     const db = createDb(connectionString);
     const graph = issueRunGraphService(db);
+    const evidence = issueRunEvidenceService(db);
 
     const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
     const [agent] = await db.insert(agents).values({
@@ -215,6 +218,92 @@ describe("issue run evidence", () => {
             metadata: { path: "artifacts/logs.zip" },
           },
         ],
+      },
+    });
+  }, 20_000);
+
+  it("keeps reviewReadyAt unset when the policy-required evidence is missing", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+    const evidence = issueRunEvidenceService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Verifier",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Missing evidence issue",
+      status: "in_review",
+      priority: "high",
+      assigneeAgentId: agent.id,
+      evidencePolicy: "code_ci_evaluator_summary_artifacts",
+      evidencePolicySource: "issue_override",
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      contextSnapshot: {
+        issueId: issue.id,
+      },
+    }).returning();
+    const [verification] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "verification",
+      rootRunId: planner.id,
+      parentRunId: worker.id,
+      graphDepth: 2,
+      repairAttempt: 0,
+      verificationVerdict: "pass",
+      artifactBundleJson: {
+        evaluatorSummary: "Looks good, but no human-facing artifact was attached.",
+      },
+      contextSnapshot: {
+        issueId: issue.id,
+      },
+      finishedAt: new Date("2026-03-22T13:00:00.000Z"),
+    }).returning();
+
+    await evidence.syncVerificationOutcome(verification.id);
+
+    const reloadedIssue = await db.select().from(issues).where(eq(issues.id, issue.id)).then((rows) => rows[0] ?? null);
+    const summary = await graph.getIssueSummary(issue.id);
+
+    expect(reloadedIssue?.lastVerificationRunId).toBe(verification.id);
+    expect(reloadedIssue?.reviewReadyAt).toBeNull();
+    expect(summary.reviewReadyAt).toBeNull();
+    expect(summary.evidenceBundle).toEqual({
+      policy: "code_ci_evaluator_summary_artifacts",
+      policySource: "issue_override",
+      reviewReadyAt: null,
+      lastVerificationRunId: verification.id,
+      bundle: {
+        evaluatorSummary: "Looks good, but no human-facing artifact was attached.",
+        verdict: "pass",
+        artifacts: [],
       },
     });
   }, 20_000);

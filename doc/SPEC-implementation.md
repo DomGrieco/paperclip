@@ -20,6 +20,14 @@ The next major architecture program is captured separately in:
 Those docs define the post-V1 implementation direction.
 This document remains the baseline contract for the currently shipped/control-plane V1 surface.
 
+Current implementation note (2026-03-22):
+
+- the first slice of Feature 1 hierarchical orchestration has landed in the control plane
+- heartbeat runs can now persist planner, worker, and verification graph metadata
+- issues now track evidence policy, review-ready state, and the last verification run
+- runtime bundles are resolved for `codex_local`, `cursor`, and `opencode_local`
+- issue detail now surfaces orchestration graph state and the review bundle
+
 ## 2. V1 Outcomes
 
 Paperclip V1 must provide a full control-plane loop for autonomous agents:
@@ -210,6 +218,10 @@ Invariant: at least one root `company` level goal per company.
 - `created_by_user_id` uuid fk `users.id` null
 - `request_depth` int not null default 0
 - `billing_code` text null
+- `evidence_policy` enum: `code_ci_evaluator_summary | code_ci_evaluator_summary_artifacts | custom`
+- `evidence_policy_source` enum: `company_default | agent_override | issue_override`
+- `review_ready_at` timestamptz null
+- `last_verification_run_id` uuid fk `heartbeat_runs.id` null
 - `started_at` timestamptz null
 - `completed_at` timestamptz null
 - `cancelled_at` timestamptz null
@@ -242,6 +254,39 @@ Invariants:
 - `error` text null
 - `external_run_id` text null
 - `context_snapshot` jsonb null
+- `run_type` enum: `planner | worker | verification`
+- `root_run_id` uuid fk `heartbeat_runs.id` null
+- `parent_run_id` uuid fk `heartbeat_runs.id` null
+- `graph_depth` int not null default 0
+- `verification_verdict` enum: `pass | repair | fail_terminal` null
+- `repair_attempt` int not null default 0
+- `policy_snapshot_json` jsonb null
+- `artifact_bundle_json` jsonb null
+
+Feature 1 invariants:
+
+- planner roots are durable and reused for issue-scoped orchestration
+- worker retries are represented as new child runs with incremented `repair_attempt`
+- verification runs are the source of review readiness and issue evidence state
+
+## 7.8.1 `heartbeat_run_artifacts`
+
+- `id` uuid pk
+- `company_id` uuid fk not null
+- `run_id` uuid fk `heartbeat_runs.id` not null
+- `issue_id` uuid fk `issues.id` null
+- `artifact_kind` text not null
+- `role` text null
+- `label` text null
+- `asset_id` uuid null
+- `document_id` uuid null
+- `issue_work_product_id` uuid null
+- `metadata` jsonb null
+
+Purpose:
+
+- attach durable review artifacts to verification runs
+- assemble issue-level review bundles without replaying raw logs
 
 ## 7.9 `cost_events`
 

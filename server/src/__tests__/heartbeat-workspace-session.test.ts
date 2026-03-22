@@ -334,4 +334,21 @@ describe("attachRuntimeBundleToContext", () => {
       paperclipMemoryRecall: bundle.memory,
     });
   });
+
+  it("removes runtime bundle fields when no bundle is available", () => {
+    const context = attachRuntimeBundleToContext(
+      {
+        issueId: "issue-1",
+        paperclipRuntimeBundle: { stale: true },
+        paperclipRuntimeProjection: { stale: true },
+        paperclipPolicy: { stale: true },
+        paperclipMemoryRecall: { stale: true },
+      },
+      null,
+    );
+
+    expect(context).toEqual({
+      issueId: "issue-1",
+    });
+  });
 });

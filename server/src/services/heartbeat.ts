@@ -2662,7 +2662,6 @@ export function heartbeatService(db: Db) {
 
     const agent = await getAgent(agentId);
     if (!agent) throw notFound("Agent not found");
-    const plannerGraph = issueId ? await issueRunGraph.resolvePlannerGraph(issueId, agentId) : null;
 
     const writeSkippedRequest = async (skipReason: string) => {
       await db.insert(agentWakeupRequests).values({
@@ -2723,6 +2722,8 @@ export function heartbeatService(db: Db) {
     const bypassIssueExecutionLock =
       reason === "issue_comment_mentioned" ||
       readNonEmptyString(enrichedContextSnapshot.wakeReason) === "issue_comment_mentioned";
+
+    const plannerGraph = issueId ? await issueRunGraph.resolvePlannerGraph(issueId, agentId) : null;
 
     if (issueId && !bypassIssueExecutionLock) {
       const agentNameKey = normalizeAgentNameKey(agent.name);

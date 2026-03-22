@@ -159,9 +159,9 @@ export function scaffoldPluginProject(options: ScaffoldPluginOptions): string {
     private: true,
     description,
     scripts: {
-      build: "node ./esbuild.config.mjs",
+      build: "tsx ./esbuild.config.mjs",
       "build:rollup": "rollup -c",
-      dev: "node ./esbuild.config.mjs --watch",
+      dev: "tsx ./esbuild.config.mjs --watch",
       "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4177",
       test: "vitest run --config ./vitest.config.ts",
       typecheck: "tsc --noEmit"
@@ -196,6 +196,7 @@ export function scaffoldPluginProject(options: ScaffoldPluginOptions): string {
       "@types/react": "^19.0.8",
       esbuild: "^0.27.3",
       rollup: "^4.38.0",
+      tsx: "^4.19.2",
       tslib: "^2.8.1",
       typescript: "^5.7.3",
       vitest: "^3.0.5"

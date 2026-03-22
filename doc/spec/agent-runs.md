@@ -9,6 +9,15 @@ Note (2026-03-21): the next orchestration architecture is now specified in `doc/
 This document still captures the current heartbeat-centric runtime subsystem and adapter details.
 Where the docs conflict for the next implementation program, the newer feature spec controls.
 
+Update (2026-03-22): the first control-plane slice of that architecture is now implemented.
+In current code:
+
+- `heartbeat_runs` persist `runType`, `rootRunId`, `parentRunId`, `graphDepth`, `verificationVerdict`, and `repairAttempt`
+- issue-scoped wakeups queue planner roots first, then worker and verification children
+- verification outcomes assemble durable review bundles and drive `issues.reviewReadyAt`
+- new runtime-bundle attachment is currently projected for `codex_local`, `cursor`, and `opencode_local`
+- `claude_local` remains supported as a legacy adapter, but new architecture work does not optimize for it
+
 ## 1. Document Role
 
 This spec defines how Paperclip actually runs agents while staying runtime-agnostic.
@@ -115,6 +124,12 @@ Control flow (happy path):
 5. Full logs stream to `RunLogStore`; metadata/events are persisted to DB and pushed to websocket subscribers.
 6. Process exits, output parser updates run result + runtime state.
 7. Agent returns to `idle` or `error`; UI updates in real time.
+
+Feature 1 extension on top of that flow:
+
+8. issue-linked runs can form a planner -> worker -> verification graph
+9. verification may schedule an automatic repair worker when policy allows more retries
+10. the issue detail surface reads orchestration and evidence state directly from the persisted graph
 
 ## 6. Agent Run Protocol (Version `agent-run/v1`)
 

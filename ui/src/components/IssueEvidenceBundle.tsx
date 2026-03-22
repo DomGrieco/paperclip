@@ -2,6 +2,7 @@ import type { IssueEvidenceBundle, OrchestrationArtifactBundleItem } from "@pape
 import { FileCheck2, FileSearch, Link2 } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateTime } from "../lib/utils";
+import { Link } from "../lib/router";
 
 function humanize(value: string) {
   return value
@@ -79,13 +80,13 @@ export function IssueEvidenceBundleCard({
         </div>
 
         {verificationRunHref ? (
-          <a
-            href={verificationRunHref}
+          <Link
+            to={verificationRunHref}
             className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-emerald-700 transition-colors hover:border-emerald-500/30 hover:text-emerald-600 dark:text-emerald-300"
           >
             <Link2 className="h-3 w-3" />
             Open verification run
-          </a>
+          </Link>
         ) : null}
 
         {bundle?.evaluatorSummary ? (

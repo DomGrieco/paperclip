@@ -51,6 +51,15 @@ function readMaxRepairAttempts(value: Record<string, unknown> | null | undefined
   return Math.max(0, Math.trunc(raw));
 }
 
+function reviewReadySatisfied(policy: EvidencePolicy, bundle: OrchestrationArtifactBundle) {
+  const hasEvaluatorSummary = typeof bundle.evaluatorSummary === "string" && bundle.evaluatorSummary.trim().length > 0;
+  const hasArtifacts = (bundle.artifacts?.length ?? 0) > 0;
+
+  if (policy === "code_ci_evaluator_summary") return hasEvaluatorSummary;
+  if (policy === "code_ci_evaluator_summary_artifacts") return hasEvaluatorSummary && hasArtifacts;
+  return true;
+}
+
 function toArtifactItem(artifact: HeartbeatRunArtifact): OrchestrationArtifactBundleItem {
   return {
     artifactId: artifact.id,
@@ -150,14 +159,15 @@ export function issueRunEvidenceService(db: Db) {
   async function getIssueEvidenceBundle(issueId: string): Promise<IssueEvidenceBundle> {
     const issue = await getIssueEvidenceRow(issueId);
     const verification = await getLatestVerificationRun(issue);
+    const bundle = verification ? await buildArtifactBundle(verification) : null;
+    const policy = asEvidencePolicy(issue.evidencePolicy);
     const reviewReadyAt =
-      verification?.verificationVerdict === "pass"
+      verification?.verificationVerdict === "pass" && bundle && reviewReadySatisfied(policy, bundle)
         ? verification.finishedAt ?? issue.reviewReadyAt ?? null
         : null;
-    const bundle = verification ? await buildArtifactBundle(verification) : null;
 
     return {
-      policy: asEvidencePolicy(issue.evidencePolicy),
+      policy,
       policySource: asEvidencePolicySource(issue.evidencePolicySource),
       reviewReadyAt,
       lastVerificationRunId: verification?.id ?? issue.lastVerificationRunId ?? null,
@@ -177,14 +187,16 @@ export function issueRunEvidenceService(db: Db) {
 
     const maxRepairAttempts = readMaxRepairAttempts(verification.policySnapshotJson);
     const bundle = await buildArtifactBundle(verification);
+    const issuePolicy = asEvidencePolicy(issue.evidencePolicy);
     const policySnapshot: OrchestrationPolicySnapshot = {
       ...(verification.policySnapshotJson ?? {}),
-      evidencePolicy: asEvidencePolicy(issue.evidencePolicy),
+      evidencePolicy: issuePolicy,
       evidencePolicySource: asEvidencePolicySource(issue.evidencePolicySource),
       maxRepairAttempts,
+      requiresHumanArtifacts: issuePolicy === "code_ci_evaluator_summary_artifacts",
     };
     const reviewReadyAt =
-      verification.verificationVerdict === "pass"
+      verification.verificationVerdict === "pass" && reviewReadySatisfied(issuePolicy, bundle)
         ? verification.finishedAt ?? new Date()
         : null;
     const artifactBundleJson = {

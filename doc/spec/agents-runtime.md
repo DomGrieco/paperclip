@@ -7,6 +7,16 @@ Audience: Operators setting up and running agents in Paperclip
 Note (2026-03-21): for the new runtime-bundle and tool-projection architecture, see `doc/spec/agent-runtime-surface.md`.
 This guide still describes the current operator-facing heartbeat runtime behavior.
 
+Update (2026-03-22): Paperclip now also attaches an issue-scoped runtime bundle for `codex_local`, `cursor`, and `opencode_local`.
+That bundle carries:
+
+- resolved issue/project/agent identifiers
+- evidence policy and TDD policy
+- lightweight memory recall snippets
+- a runtime projection descriptor for materializing tool-facing files under `.paperclip/runtime`
+
+`claude_local` is still available for compatibility, but it is legacy/non-priority for new architecture work.
+
 ## 1. What this system does
 
 Agents in Paperclip do not run continuously.  
@@ -37,8 +47,10 @@ If an agent is already running, new wakeups are merged (coalesced) instead of la
 
 Common choices:
 
-- `claude_local`: runs your local `claude` CLI
 - `codex_local`: runs your local `codex` CLI
+- `cursor`: runs the local Cursor adapter
+- `opencode_local`: runs the local OpenCode adapter
+- `claude_local`: legacy local Claude adapter
 - `process`: generic shell command adapter
 - `http`: calls an external HTTP endpoint
 
@@ -62,6 +74,9 @@ For local adapters, set:
 - `timeoutSec` (max runtime per heartbeat)
 - `graceSec` (time before force-kill after timeout/cancel)
 - optional env vars and extra CLI args
+
+If Paperclip resolves an execution workspace for the run, that resolved workspace directory takes precedence over a stale configured `cwd`.
+This prevents local adapters from escaping the Paperclip-managed workspace when a fallback or project workspace has already been chosen.
 
 ## 3.4 Prompt templates
 
@@ -95,6 +110,13 @@ For each heartbeat run you get:
 - error text and stderr/stdout excerpts
 - token usage/cost when available from the adapter
 - full logs (stored outside core run rows, optimized for large output)
+
+For issue-linked orchestration work you also get:
+
+- persisted run graph metadata (`planner`, `worker`, `verification`)
+- automatic repair-loop tracking via `repairAttempt`
+- verification verdicts (`pass`, `repair`, `fail_terminal`)
+- issue-level review bundle state and `reviewReadyAt`
 
 In local/dev setups, full logs are stored on disk under the configured run-log path.
 
@@ -166,10 +188,11 @@ Start with least privilege where possible, and avoid exposing secrets in broad r
 
 ## 10. Minimal setup checklist
 
-1. Choose adapter (`claude_local` or `codex_local`).
+1. Choose adapter (`codex_local`, `cursor`, `opencode_local`, or a legacy adapter).
 2. Set `cwd` to the target workspace.
 3. Add bootstrap + normal prompt templates.
 4. Configure heartbeat policy (timer and/or assignment wakeups).
 5. Trigger a manual wakeup.
 6. Confirm run succeeds and session/token usage is recorded.
-7. Watch live updates and iterate prompt/config.
+7. If the run is issue-linked, confirm orchestration state and review bundle appear on the issue detail page.
+8. Watch live updates and iterate prompt/config.
