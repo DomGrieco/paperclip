@@ -38,6 +38,10 @@ import { isAllowedContentType, MAX_ATTACHMENT_BYTES } from "../attachment-types.
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
 
+
+const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function issueRoutes(db: Db, storage: StorageService) {
   const router = Router();
   const svc = issueService(db);
@@ -163,11 +167,9 @@ export function issueRoutes(db: Db, storage: StorageService) {
   async function normalizeIssueIdentifier(rawId: string): Promise<string> {
     if (/^[A-Z]+-\d+$/i.test(rawId)) {
       const issue = await svc.getByIdentifier(rawId);
-      if (issue) {
-        return issue.id;
-      }
+      return issue?.id ?? NIL_UUID;
     }
-    return rawId;
+    return UUID_LIKE_RE.test(rawId) ? rawId : NIL_UUID;
   }
 
   // Resolve issue identifiers (e.g. "PAP-39") to UUIDs for all /issues/:id routes
