@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import type { AdapterArtifactReport } from "@paperclipai/adapter-utils";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRunArtifacts, heartbeatRuns, issues } from "@paperclipai/db";
 import type {
@@ -175,6 +176,33 @@ export function issueRunEvidenceService(db: Db) {
     };
   }
 
+  async function persistReportedRunArtifacts(input: {
+    companyId: string;
+    runId: string;
+    issueId: string | null;
+    artifacts: AdapterArtifactReport[];
+  }) {
+    if (input.artifacts.length === 0) return [];
+
+    return db
+      .insert(heartbeatRunArtifacts)
+      .values(
+        input.artifacts.map((artifact) => ({
+          companyId: input.companyId,
+          runId: input.runId,
+          issueId: artifact.issueId ?? input.issueId,
+          artifactKind: artifact.artifactKind,
+          role: artifact.role ?? null,
+          label: artifact.label ?? null,
+          assetId: artifact.assetId ?? null,
+          documentId: artifact.documentId ?? null,
+          issueWorkProductId: artifact.issueWorkProductId ?? null,
+          metadata: artifact.metadata ?? null,
+        })),
+      )
+      .returning();
+  }
+
   async function syncVerificationOutcome(runId: string) {
     const verification = await getVerificationRunById(runId);
     if (!verification || verification.runType !== "verification") return null;
@@ -233,6 +261,7 @@ export function issueRunEvidenceService(db: Db) {
 
   return {
     getIssueEvidenceBundle,
+    persistReportedRunArtifacts,
     syncVerificationOutcome,
   };
 }

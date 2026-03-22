@@ -345,6 +345,10 @@ async function resolveLedgerScopeForRun(
   };
 }
 
+function readAdapterVerificationVerdict(value: unknown): "pass" | "repair" | "fail_terminal" | null {
+  return value === "pass" || value === "repair" || value === "fail_terminal" ? value : null;
+}
+
 function normalizeUsageTotals(usage: UsageSummary | null | undefined): UsageTotals | null {
   if (!usage) return null;
   return {
@@ -2331,6 +2335,8 @@ export function heartbeatService(db: Db) {
         signal: adapterResult.signal,
         usageJson,
         resultJson: adapterResult.resultJson ?? null,
+        verificationVerdict:
+          run.runType === "verification" ? readAdapterVerificationVerdict(adapterResult.verificationVerdict) : null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,
         stderrExcerpt,
@@ -2343,6 +2349,15 @@ export function heartbeatService(db: Db) {
         finishedAt: new Date(),
         error: adapterResult.errorMessage ?? null,
       });
+
+      if (adapterResult.artifacts?.length) {
+        await issueRunEvidence.persistReportedRunArtifacts({
+          companyId: agent.companyId,
+          runId: run.id,
+          issueId,
+          artifacts: adapterResult.artifacts,
+        });
+      }
 
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {

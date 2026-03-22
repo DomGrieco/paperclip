@@ -307,4 +307,117 @@ describe("issue run evidence", () => {
       },
     });
   }, 20_000);
+
+  it("persists adapter-reported artifacts and surfaces them in the synced evidence bundle", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+    const evidence = issueRunEvidenceService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Verifier",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Artifact ingestion issue",
+      status: "in_review",
+      priority: "high",
+      assigneeAgentId: agent.id,
+      evidencePolicy: "code_ci_evaluator_summary_artifacts",
+      evidencePolicySource: "issue_override",
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      contextSnapshot: { issueId: issue.id },
+    }).returning();
+    const [verification] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "verification",
+      rootRunId: planner.id,
+      parentRunId: worker.id,
+      graphDepth: 2,
+      repairAttempt: 0,
+      verificationVerdict: "pass",
+      resultJson: { evaluatorSummary: "Artifacts were uploaded by the runner." },
+      contextSnapshot: { issueId: issue.id },
+      finishedAt: new Date("2026-03-22T14:00:00.000Z"),
+    }).returning();
+
+    await evidence.persistReportedRunArtifacts({
+      companyId: company.id,
+      runId: verification.id,
+      issueId: issue.id,
+      artifacts: [
+        {
+          artifactKind: "browser_recording",
+          role: "review",
+          label: "walkthrough",
+          metadata: { path: "artifacts/review.mp4" },
+        },
+        {
+          artifactKind: "screenshot",
+          role: "review",
+          label: "final-state",
+          metadata: { path: "artifacts/final.png" },
+        },
+      ],
+    });
+
+    await evidence.syncVerificationOutcome(verification.id);
+
+    const summary = await graph.getIssueSummary(issue.id);
+
+    expect(summary.reviewReadyAt?.toISOString()).toBe("2026-03-22T14:00:00.000Z");
+    expect(summary.evidenceBundle).toEqual({
+      policy: "code_ci_evaluator_summary_artifacts",
+      policySource: "issue_override",
+      reviewReadyAt: new Date("2026-03-22T14:00:00.000Z"),
+      lastVerificationRunId: verification.id,
+      bundle: {
+        evaluatorSummary: "Artifacts were uploaded by the runner.",
+        verdict: "pass",
+        artifacts: [
+          {
+            artifactId: expect.any(String),
+            artifactKind: "screenshot",
+            role: "review",
+            label: "final-state",
+            metadata: { path: "artifacts/final.png" },
+          },
+          {
+            artifactId: expect.any(String),
+            artifactKind: "browser_recording",
+            role: "review",
+            label: "walkthrough",
+            metadata: { path: "artifacts/review.mp4" },
+          },
+        ],
+      },
+    });
+  }, 20_000);
+
 });

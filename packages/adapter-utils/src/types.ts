@@ -61,6 +61,19 @@ export interface AdapterRuntimeServiceReport {
   healthStatus?: "unknown" | "healthy" | "unhealthy";
 }
 
+export type AdapterVerificationVerdict = "pass" | "repair" | "fail_terminal";
+
+export interface AdapterArtifactReport {
+  issueId?: string | null;
+  artifactKind: string;
+  role?: string | null;
+  label?: string | null;
+  assetId?: string | null;
+  documentId?: string | null;
+  issueWorkProductId?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface AdapterExecutionResult {
   exitCode: number | null;
   signal: string | null;
@@ -82,6 +95,8 @@ export interface AdapterExecutionResult {
   costUsd?: number | null;
   resultJson?: Record<string, unknown> | null;
   runtimeServices?: AdapterRuntimeServiceReport[];
+  artifacts?: AdapterArtifactReport[];
+  verificationVerdict?: AdapterVerificationVerdict | null;
   summary?: string | null;
   clearSession?: boolean;
   question?: {

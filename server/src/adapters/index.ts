@@ -3,6 +3,7 @@ export type {
   ServerAdapterModule,
   AdapterExecutionContext,
   AdapterExecutionResult,
+  AdapterArtifactReport,
   AdapterInvocationMeta,
   AdapterEnvironmentCheckLevel,
   AdapterEnvironmentCheck,
