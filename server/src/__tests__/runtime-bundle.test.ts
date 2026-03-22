@@ -104,10 +104,11 @@ describe("resolveRuntimeBundle", () => {
 
     const db = createDb(connectionString);
 
-    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST", description: "Run the company as a disciplined autonomous software team." }).returning();
     const [project] = await db.insert(projects).values({
       companyId: company.id,
       name: "Runtime Bundle Project",
+      description: "Project context should be present in the recall packet.",
       status: "in_progress",
       executionWorkspacePolicy: {
         defaultMode: "isolated_workspace",
@@ -119,6 +120,7 @@ describe("resolveRuntimeBundle", () => {
       projectId: project.id,
       name: "Worker",
       role: "engineer",
+      capabilities: "Ship code with tests and clear handoffs.",
       adapterType: "codex_local",
       adapterConfig: {},
       runtimeConfig: {},
@@ -157,13 +159,40 @@ describe("resolveRuntimeBundle", () => {
     });
     expect(bundle.memory.snippets).toEqual([
       {
+        scope: "company",
+        source: "company.description",
+        sourceId: company.id,
+        content: "Run the company as a disciplined autonomous software team.",
+        freshness: "static",
+        updatedAt: expect.any(String),
+        rank: 1,
+      },
+      {
+        scope: "project",
+        source: "project.description",
+        sourceId: project.id,
+        content: "Project context should be present in the recall packet.",
+        freshness: "static",
+        updatedAt: expect.any(String),
+        rank: 2,
+      },
+      {
         scope: "issue",
         source: "issue.description",
         sourceId: issue.id,
         content: "Remember the issue operating context.",
         freshness: "static",
         updatedAt: expect.any(String),
-        rank: 1,
+        rank: 3,
+      },
+      {
+        scope: "agent",
+        source: "agent.capabilities",
+        sourceId: agent.id,
+        content: "Ship code with tests and clear handoffs.",
+        freshness: "static",
+        updatedAt: expect.any(String),
+        rank: 4,
       },
     ]);
     expect(bundle.projection.runtime).toBe("codex");
@@ -225,7 +254,7 @@ describe("resolveRuntimeBundle", () => {
         content: "The worker should see the strict evidence policy.",
         freshness: "static",
         updatedAt: expect.any(String),
-        rank: 1,
+        rank: 3,
       },
     ]);
   }, 20_000);

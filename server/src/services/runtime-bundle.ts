@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agents, issues, projects } from "@paperclipai/db";
+import { agents, companies, issues, projects } from "@paperclipai/db";
 import type { RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 
@@ -74,13 +74,17 @@ function deriveRunnerBundle(projectPolicy: Record<string, unknown> | null): Runt
 }
 
 export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleInput): Promise<RuntimeBundle> {
-  const [agent, issue] = await Promise.all([
+  const [agent, issue, company] = await Promise.all([
     db
       .select({
         id: agents.id,
         companyId: agents.companyId,
         name: agents.name,
         adapterType: agents.adapterType,
+        role: agents.role,
+        title: agents.title,
+        capabilities: agents.capabilities,
+        updatedAt: agents.updatedAt,
       })
       .from(agents)
       .where(eq(agents.id, input.agentId))
@@ -103,6 +107,15 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       .from(issues)
       .where(eq(issues.id, input.issueId))
       .then((rows) => rows[0] ?? null),
+    db
+      .select({
+        id: companies.id,
+        description: companies.description,
+        updatedAt: companies.updatedAt,
+      })
+      .from(companies)
+      .where(eq(companies.id, input.companyId))
+      .then((rows) => rows[0] ?? null),
   ]);
 
   if (!agent || agent.companyId !== input.companyId) throw notFound("Agent not found");
@@ -113,7 +126,9 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         .select({
           id: projects.id,
           name: projects.name,
+          description: projects.description,
           executionWorkspacePolicy: projects.executionWorkspacePolicy,
+          updatedAt: projects.updatedAt,
         })
         .from(projects)
         .where(eq(projects.id, issue.projectId))
@@ -154,19 +169,60 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
     },
     runner: deriveRunnerBundle(project?.executionWorkspacePolicy ?? null),
     memory: {
-      snippets: issue.description
-        ? [
-            {
-              scope: "issue",
-              source: "issue.description",
-              sourceId: issue.id,
-              content: issue.description,
-              freshness: "static",
-              updatedAt: new Date(issue.updatedAt ?? issue.createdAt).toISOString(),
-              rank: 1,
-            },
-          ]
-        : [],
+      snippets: [
+        ...(company?.description
+          ? [
+              {
+                scope: "company" as const,
+                source: "company.description",
+                sourceId: company.id,
+                content: company.description,
+                freshness: "static" as const,
+                updatedAt: new Date(company.updatedAt).toISOString(),
+                rank: 1,
+              },
+            ]
+          : []),
+        ...(project?.description
+          ? [
+              {
+                scope: "project" as const,
+                source: "project.description",
+                sourceId: project.id,
+                content: project.description,
+                freshness: "static" as const,
+                updatedAt: new Date(project.updatedAt).toISOString(),
+                rank: 2,
+              },
+            ]
+          : []),
+        ...(issue.description
+          ? [
+              {
+                scope: "issue" as const,
+                source: "issue.description",
+                sourceId: issue.id,
+                content: issue.description,
+                freshness: "static" as const,
+                updatedAt: new Date(issue.updatedAt ?? issue.createdAt).toISOString(),
+                rank: 3,
+              },
+            ]
+          : []),
+        ...(agent.capabilities
+          ? [
+              {
+                scope: "agent" as const,
+                source: "agent.capabilities",
+                sourceId: agent.id,
+                content: agent.capabilities,
+                freshness: "static" as const,
+                updatedAt: new Date(agent.updatedAt).toISOString(),
+                rank: 4,
+              },
+            ]
+          : []),
+      ],
     },
     projection: buildRuntimeBundleProjection(input.runtime),
   };
