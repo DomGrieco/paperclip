@@ -2337,6 +2337,7 @@ export function heartbeatService(db: Db) {
         resultJson: adapterResult.resultJson ?? null,
         verificationVerdict:
           run.runType === "verification" ? readAdapterVerificationVerdict(adapterResult.verificationVerdict) : null,
+        runnerSnapshotJson: (runtimeBundle?.runner as Record<string, unknown> | null | undefined) ?? null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,
         stderrExcerpt,

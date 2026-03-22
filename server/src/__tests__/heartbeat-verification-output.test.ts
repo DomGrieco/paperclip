@@ -221,6 +221,15 @@ describe("heartbeat verification output ingestion", () => {
 
     expect(finalized.status).toBe("succeeded");
     expect(finalized.verificationVerdict).toBe("pass");
+    expect(finalized.runnerSnapshotJson).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: null,
+      executionMode: null,
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
     expect(reloadedIssue?.lastVerificationRunId).toBe(verification.id);
     expect(reloadedIssue?.reviewReadyAt).not.toBeNull();
     expect(summary.evidenceBundle?.bundle).toEqual({

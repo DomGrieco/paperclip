@@ -13,6 +13,7 @@ import type {
   OrchestrationArtifactBundle,
   OrchestrationPolicySnapshot,
   RuntimeBundle,
+  RuntimeBundleRunner,
 } from "./orchestration.js";
 
 export interface HeartbeatContextSnapshot extends Record<string, unknown> {
@@ -53,6 +54,7 @@ export interface HeartbeatRun {
   verificationVerdict: VerificationVerdict | null;
   repairAttempt: number;
   policySnapshotJson: OrchestrationPolicySnapshot | null;
+  runnerSnapshotJson: RuntimeBundleRunner | null;
   artifactBundleJson: OrchestrationArtifactBundle | null;
   createdAt: Date;
   updatedAt: Date;

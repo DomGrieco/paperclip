@@ -1,0 +1,1 @@
+ALTER TABLE "heartbeat_runs" ADD COLUMN "runner_snapshot_json" jsonb;

@@ -149,6 +149,7 @@ describe("run graph schema contract", () => {
     expect(run.runType).toBe("planner");
     expect(run.rootRunId).toBe(run.id);
     expect(run.verificationVerdict).toBeNull();
+    expect(run.runnerSnapshotJson).toBeNull();
   }, 20_000);
 
   it("creates a planner root and bounded worker children for an issue", async () => {

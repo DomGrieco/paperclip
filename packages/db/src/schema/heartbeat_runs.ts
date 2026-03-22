@@ -39,6 +39,7 @@ export const heartbeatRuns = pgTable(
     verificationVerdict: text("verification_verdict"),
     repairAttempt: integer("repair_attempt").notNull().default(0),
     policySnapshotJson: jsonb("policy_snapshot_json").$type<Record<string, unknown>>(),
+    runnerSnapshotJson: jsonb("runner_snapshot_json").$type<Record<string, unknown>>(),
     artifactBundleJson: jsonb("artifact_bundle_json").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
