@@ -11,6 +11,7 @@ import {
   ensurePostgresDatabase,
   issues,
   projects,
+  heartbeatRuns,
 } from "@paperclipai/db";
 import { resolveRuntimeBundle } from "../services/runtime-bundle.js";
 
@@ -146,8 +147,22 @@ describe("resolveRuntimeBundle", () => {
 
     expect(bundle.issue?.id).toBe(issue.id);
     expect(bundle.project?.id).toBe(project.id);
-    expect(bundle.policy.tddMode).toBe("required");
-    expect(bundle.policy.evidencePolicy).toBe("code_ci_evaluator_summary");
+    expect(bundle.policy).toEqual({
+      tddMode: "required",
+      evidencePolicy: "code_ci_evaluator_summary",
+      evidencePolicySource: "company_default",
+      maxRepairAttempts: 3,
+      requiresHumanArtifacts: false,
+    });
+    expect(bundle.run).toEqual({
+      id: null,
+      runType: null,
+      rootRunId: null,
+      parentRunId: null,
+      graphDepth: null,
+      repairAttempt: 0,
+      verificationVerdict: null,
+    });
     expect(bundle.runner).toEqual({
       target: "local_host",
       provider: "local_process",
@@ -195,6 +210,22 @@ describe("resolveRuntimeBundle", () => {
         rank: 4,
       },
     ]);
+    expect(bundle.verification).toEqual({
+      required: true,
+      requiresEvaluatorSummary: true,
+      requiresArtifacts: false,
+      latestVerificationRunId: null,
+      reviewReadyAt: null,
+      runner: {
+        target: "local_host",
+        provider: "local_process",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: false,
+        sandboxed: false,
+        isolationBoundary: "host_process",
+      },
+    });
     expect(bundle.projection.runtime).toBe("codex");
   }, 20_000);
 
@@ -224,11 +255,32 @@ describe("resolveRuntimeBundle", () => {
       evidencePolicy: "code_ci_evaluator_summary_artifacts",
       evidencePolicySource: "issue_override",
     }).returning();
+    const [run] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      status: "queued",
+      runType: "verification",
+      rootRunId: null,
+      parentRunId: null,
+      graphDepth: 0,
+      repairAttempt: 2,
+      verificationVerdict: null,
+      policySnapshotJson: {
+        evidencePolicy: "code_ci_evaluator_summary_artifacts",
+        evidencePolicySource: "issue_override",
+        maxRepairAttempts: 5,
+        requiresHumanArtifacts: true,
+      },
+      contextSnapshot: { issueId: issue.id },
+    }).returning();
 
     const bundle = await resolveRuntimeBundle(db, {
       companyId: company.id,
       issueId: issue.id,
       agentId: agent.id,
+      runId: run.id,
       runtime: "opencode",
     });
 
@@ -236,15 +288,42 @@ describe("resolveRuntimeBundle", () => {
       tddMode: "required",
       evidencePolicy: "code_ci_evaluator_summary_artifacts",
       evidencePolicySource: "issue_override",
+      maxRepairAttempts: 5,
+      requiresHumanArtifacts: true,
+    });
+    expect(bundle.run).toEqual({
+      id: run.id,
+      runType: "verification",
+      rootRunId: null,
+      parentRunId: null,
+      graphDepth: 0,
+      repairAttempt: 2,
+      verificationVerdict: null,
     });
     expect(bundle.runner).toEqual({
-      target: "local_host",
-      provider: "local_process",
+      target: "cloud_sandbox",
+      provider: "cloud_sandbox",
       workspaceStrategyType: null,
       executionMode: null,
-      browserCapable: false,
-      sandboxed: false,
-      isolationBoundary: "host_process",
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "cloud_sandbox",
+    });
+    expect(bundle.verification).toEqual({
+      required: true,
+      requiresEvaluatorSummary: true,
+      requiresArtifacts: true,
+      latestVerificationRunId: null,
+      reviewReadyAt: null,
+      runner: {
+        target: "cloud_sandbox",
+        provider: "cloud_sandbox",
+        workspaceStrategyType: null,
+        executionMode: null,
+        browserCapable: true,
+        sandboxed: true,
+        isolationBoundary: "cloud_sandbox",
+      },
     });
     expect(bundle.memory.snippets).toEqual([
       {

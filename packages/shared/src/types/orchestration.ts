@@ -21,6 +21,27 @@ export interface RuntimeBundlePolicy {
   tddMode: RuntimeBundleTddMode;
   evidencePolicy: EvidencePolicy;
   evidencePolicySource: EvidencePolicySource;
+  maxRepairAttempts: number;
+  requiresHumanArtifacts: boolean;
+}
+
+export interface RuntimeBundleRun {
+  id: string | null;
+  runType: HeartbeatRunType | null;
+  rootRunId: string | null;
+  parentRunId: string | null;
+  graphDepth: number | null;
+  repairAttempt: number;
+  verificationVerdict: VerificationVerdict | null;
+}
+
+export interface RuntimeBundleVerification {
+  required: boolean;
+  requiresEvaluatorSummary: boolean;
+  requiresArtifacts: boolean;
+  latestVerificationRunId: string | null;
+  reviewReadyAt: string | null;
+  runner: RuntimeBundleRunner;
 }
 
 export interface RuntimeBundleMemorySnippet {
@@ -76,11 +97,10 @@ export interface RuntimeBundle {
     status: string;
     priority: string;
   } | null;
-  run: {
-    id: string | null;
-  };
+  run: RuntimeBundleRun;
   policy: RuntimeBundlePolicy;
   runner: RuntimeBundleRunner;
+  verification: RuntimeBundleVerification;
   memory: RuntimeBundleMemoryPacket;
   projection: RuntimeBundleProjection;
 }

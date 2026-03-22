@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { agents, companies, heartbeatRuns, issues, projects } from "@paperclipai/db";
-import type { RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
+import type { OrchestrationPolicySnapshot, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
 
@@ -12,6 +12,18 @@ type ResolveRuntimeBundleInput = {
   runId?: string | null;
   runtime: RuntimeBundleTarget;
 };
+
+const DEFAULT_MAX_REPAIR_ATTEMPTS = 3;
+
+function resolveMaxRepairAttempts(policy: OrchestrationPolicySnapshot | null | undefined) {
+  const raw = Number(policy?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS);
+  if (!Number.isFinite(raw)) return DEFAULT_MAX_REPAIR_ATTEMPTS;
+  return Math.max(0, Math.trunc(raw));
+}
+
+function requiresHumanArtifacts(evidencePolicy: string) {
+  return evidencePolicy === "code_ci_evaluator_summary_artifacts";
+}
 
 export function resolveRuntimeBundleTarget(adapterType: string | null | undefined): RuntimeBundleTarget | null {
   if (adapterType === "codex_local") return "codex";
@@ -59,6 +71,8 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         updatedAt: issues.updatedAt,
         evidencePolicy: issues.evidencePolicy,
         evidencePolicySource: issues.evidencePolicySource,
+        reviewReadyAt: issues.reviewReadyAt,
+        lastVerificationRunId: issues.lastVerificationRunId,
       })
       .from(issues)
       .where(eq(issues.id, input.issueId))
@@ -77,6 +91,12 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
           .select({
             id: heartbeatRuns.id,
             runType: heartbeatRuns.runType,
+            rootRunId: heartbeatRuns.rootRunId,
+            parentRunId: heartbeatRuns.parentRunId,
+            graphDepth: heartbeatRuns.graphDepth,
+            repairAttempt: heartbeatRuns.repairAttempt,
+            verificationVerdict: heartbeatRuns.verificationVerdict,
+            policySnapshotJson: heartbeatRuns.policySnapshotJson,
           })
           .from(heartbeatRuns)
           .where(eq(heartbeatRuns.id, input.runId))
@@ -100,6 +120,17 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         .where(eq(projects.id, issue.projectId))
         .then((rows) => rows[0] ?? null)
     : null;
+
+  const policySnapshot = (run?.policySnapshotJson ?? null) as OrchestrationPolicySnapshot | null;
+  const maxRepairAttempts = resolveMaxRepairAttempts(policySnapshot);
+  const effectiveEvidencePolicy = issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"];
+  const effectiveEvidencePolicySource = issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"];
+  const plannedRunner = resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null);
+  const effectiveRunner = applyVerificationRunnerPolicy({
+    planned: plannedRunner,
+    runType: run?.runType ?? null,
+    evidencePolicy: issue.evidencePolicy,
+  });
 
   return {
     runtime: input.runtime,
@@ -126,18 +157,30 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       priority: issue.priority,
     },
     run: {
-      id: input.runId ?? null,
+      id: run?.id ?? input.runId ?? null,
+      runType: (run?.runType ?? null) as RuntimeBundle["run"]["runType"],
+      rootRunId: run?.rootRunId ?? null,
+      parentRunId: run?.parentRunId ?? null,
+      graphDepth: run?.graphDepth ?? null,
+      repairAttempt: run?.repairAttempt ?? 0,
+      verificationVerdict: (run?.verificationVerdict ?? null) as RuntimeBundle["run"]["verificationVerdict"],
     },
     policy: {
       tddMode: "required",
-      evidencePolicy: issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"],
-      evidencePolicySource: issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"],
+      evidencePolicy: effectiveEvidencePolicy,
+      evidencePolicySource: effectiveEvidencePolicySource,
+      maxRepairAttempts,
+      requiresHumanArtifacts: requiresHumanArtifacts(issue.evidencePolicy),
     },
-    runner: applyVerificationRunnerPolicy({
-      planned: resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null),
-      runType: run?.runType ?? null,
-      evidencePolicy: issue.evidencePolicy,
-    }),
+    runner: effectiveRunner,
+    verification: {
+      required: true,
+      requiresEvaluatorSummary: true,
+      requiresArtifacts: requiresHumanArtifacts(issue.evidencePolicy),
+      latestVerificationRunId: issue.lastVerificationRunId ?? null,
+      reviewReadyAt: issue.reviewReadyAt ? new Date(issue.reviewReadyAt).toISOString() : null,
+      runner: effectiveRunner,
+    },
     memory: {
       snippets: [
         ...(company?.description
