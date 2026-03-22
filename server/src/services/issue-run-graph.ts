@@ -271,6 +271,7 @@ export function issueRunGraphService(db: Db) {
           graphDepth: heartbeatRuns.graphDepth,
           repairAttempt: heartbeatRuns.repairAttempt,
           verificationVerdict: heartbeatRuns.verificationVerdict,
+          runnerSnapshotJson: heartbeatRuns.runnerSnapshotJson,
         })
         .from(heartbeatRuns)
         .where(
@@ -303,6 +304,7 @@ export function issueRunGraphService(db: Db) {
           graphDepth: run.graphDepth,
           repairAttempt: run.repairAttempt,
           verificationVerdict: asVerificationVerdict(run.verificationVerdict),
+          runnerSnapshotJson: (run.runnerSnapshotJson as IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]) ?? null,
         })),
       };
     });

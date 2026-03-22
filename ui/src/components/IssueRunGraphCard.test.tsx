@@ -30,6 +30,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 0,
       repairAttempt: 0,
       verificationVerdict: null,
+      runnerSnapshotJson: {
+        target: "local_host",
+        provider: "local_process",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: false,
+        sandboxed: false,
+        isolationBoundary: "host_process",
+      },
     },
     {
       id: "run-work",
@@ -50,6 +59,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 1,
       repairAttempt: 0,
       verificationVerdict: "pass",
+      runnerSnapshotJson: {
+        target: "cloud_sandbox",
+        provider: "cloud_sandbox",
+        workspaceStrategyType: "cloud_sandbox",
+        executionMode: "isolated_workspace",
+        browserCapable: true,
+        sandboxed: true,
+        isolationBoundary: "cloud_sandbox",
+      },
     },
   ],
 };
@@ -109,6 +127,9 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Worker");
     expect(html).toContain("Verification");
     expect(html).toContain("Repair 1");
+    expect(html).toContain("Local Host");
+    expect(html).toContain("Cloud Sandbox");
+    expect(html).toContain("Browser Capable");
     expect(html).toContain("/TST/agents/agent-plan/runs/run-plan");
     expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
   });

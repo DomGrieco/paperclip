@@ -35,6 +35,19 @@ function evidencePolicyLabel(policy: IssueOrchestrationSummary["evidencePolicy"]
   }
 }
 
+function runnerTargetLabel(target: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["target"]) {
+  switch (target) {
+    case "local_host":
+      return "Local Host";
+    case "adapter_managed":
+      return "Adapter Managed";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    default:
+      return humanize(target);
+  }
+}
+
 function countByType(orchestration: IssueOrchestrationSummary) {
   return orchestration.nodes.reduce(
     (acc, node) => {
@@ -138,6 +151,16 @@ export function IssueRunGraphCard({
                       {node.repairAttempt > 0 ? (
                         <span className="rounded-full border border-amber-500/30 bg-amber-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                           Repair {node.repairAttempt}
+                        </span>
+                      ) : null}
+                      {node.runnerSnapshotJson ? (
+                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                          {runnerTargetLabel(node.runnerSnapshotJson.target)}
+                        </span>
+                      ) : null}
+                      {node.runnerSnapshotJson?.browserCapable ? (
+                        <span className="rounded-full border border-sky-500/30 bg-sky-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+                          Browser Capable
                         </span>
                       ) : null}
                     </div>

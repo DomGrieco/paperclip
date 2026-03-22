@@ -135,6 +135,7 @@ export interface IssueRunGraphSummaryNode {
   graphDepth: number;
   repairAttempt: number;
   verificationVerdict: VerificationVerdict | null;
+  runnerSnapshotJson?: RuntimeBundleRunner | null;
 }
 
 export interface IssueOrchestrationSummary {
