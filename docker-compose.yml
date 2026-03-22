@@ -51,6 +51,39 @@ services:
       db:
         condition: service_healthy
 
+  server-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime-tools
+    working_dir: /workspace
+    command: ["sh", "-lc", "pnpm dev --tailscale-auth"]
+    environment:
+      CI: "1"
+      HOME: /paperclip
+      npm_config_store_dir: /pnpm/store
+      DATABASE_URL: postgres://paperclip:paperclip@db:5432/paperclip
+      PORT: "3100"
+      PAPERCLIP_HOME: /paperclip
+      PAPERCLIP_INSTANCE_ID: default
+      PAPERCLIP_CONFIG: /paperclip/instances/default/config.json
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
+    user: node
+    ports:
+      - "3100:3100"
+    volumes:
+      - .:/workspace
+      - paperclip-node-modules:/workspace/node_modules
+      - paperclip-pnpm-store:/pnpm/store
+      - paperclip-data:/paperclip
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
   paperclip-data:
