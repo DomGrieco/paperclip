@@ -34,6 +34,10 @@ export interface OrchestrationArtifactBundleItem {
   artifactKind: string;
   role?: string | null;
   label?: string | null;
+  assetId?: string | null;
+  documentId?: string | null;
+  issueWorkProductId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface OrchestrationArtifactBundle {
@@ -68,5 +72,6 @@ export interface IssueOrchestrationSummary {
   reviewReadyAt: Date | null;
   evidencePolicy: EvidencePolicy;
   evidencePolicySource: EvidencePolicySource;
+  evidenceBundle?: IssueEvidenceBundle | null;
   nodes: IssueRunGraphSummaryNode[];
 }

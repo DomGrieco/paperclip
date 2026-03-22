@@ -326,6 +326,8 @@ export function issueRoutes(db: Db, storage: StorageService) {
     const workProducts = await workProductsSvc.listForIssue(issue.id);
     res.json({
       ...issue,
+      reviewReadyAt: orchestration.reviewReadyAt,
+      lastVerificationRunId: orchestration.lastVerificationRunId,
       goalId: goal?.id ?? issue.goalId,
       ancestors,
       ...documentPayload,
@@ -335,6 +337,7 @@ export function issueRoutes(db: Db, storage: StorageService) {
       currentExecutionWorkspace,
       workProducts,
       orchestration,
+      evidenceBundle: orchestration.evidenceBundle ?? null,
     });
   });
 

@@ -6,11 +6,14 @@ import type {
   HeartbeatRunType,
   HeartbeatRun,
   IssueOrchestrationSummary,
+  OrchestrationPolicySnapshot,
   VerificationVerdict,
 } from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
+import { issueRunEvidenceService } from "./issue-run-evidence.js";
 
 const MAX_WORKER_CHILDREN = 16;
+const DEFAULT_MAX_REPAIR_ATTEMPTS = 3;
 type HeartbeatRunRow = typeof heartbeatRuns.$inferSelect;
 
 type SpawnWorkerInput = {
@@ -43,7 +46,15 @@ function asVerificationVerdict(value: string | null): VerificationVerdict | null
   return value as VerificationVerdict | null;
 }
 
+function resolveMaxRepairAttempts(policy: OrchestrationPolicySnapshot | null | undefined) {
+  const raw = Number(policy?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS);
+  if (!Number.isFinite(raw)) return DEFAULT_MAX_REPAIR_ATTEMPTS;
+  return Math.max(0, Math.trunc(raw));
+}
+
 export function issueRunGraphService(db: Db) {
+  const evidence = issueRunEvidenceService(db);
+
   async function getIssue(issueId: string) {
     return db
       .select({
@@ -177,63 +188,130 @@ export function issueRunGraphService(db: Db) {
     return inserted;
   }
 
-  async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
-    const issue = await getIssue(issueId);
-    if (!issue) throw notFound("Issue not found");
+  async function scheduleRepairFromVerification(verificationRunId: string) {
+    const verification = await getRun(verificationRunId);
+    if (!verification) throw notFound("Verification run not found");
+    if (verification.runType !== "verification") throw conflict("Repair scheduling requires a verification run");
+    if (verification.verificationVerdict !== "repair") return null;
 
-    const runs = await db
-      .select({
-        id: heartbeatRuns.id,
-        runType: heartbeatRuns.runType,
-        status: heartbeatRuns.status,
-        parentRunId: heartbeatRuns.parentRunId,
-        rootRunId: heartbeatRuns.rootRunId,
-        graphDepth: heartbeatRuns.graphDepth,
-        repairAttempt: heartbeatRuns.repairAttempt,
-        verificationVerdict: heartbeatRuns.verificationVerdict,
-        finishedAt: heartbeatRuns.finishedAt,
-        artifactBundleJson: heartbeatRuns.artifactBundleJson,
-      })
+    const worker = verification.parentRunId ? await getRun(verification.parentRunId) : null;
+    if (!worker) throw notFound("Verified worker run not found");
+    const plannerRootId = worker.rootRunId ?? verification.rootRunId;
+    if (!plannerRootId) throw conflict("Verification run is missing a planner root");
+    const planner = await getRun(plannerRootId);
+    if (!planner || planner.runType !== "planner") throw conflict("Repair scheduling requires a planner root");
+
+    const maxRepairAttempts = resolveMaxRepairAttempts(
+      verification.policySnapshotJson as OrchestrationPolicySnapshot | null | undefined,
+    );
+    const nextRepairAttempt = (worker.repairAttempt ?? 0) + 1;
+    if (nextRepairAttempt > maxRepairAttempts) return null;
+
+    const existingRetry = await db
+      .select()
       .from(heartbeatRuns)
       .where(
         and(
-          eq(heartbeatRuns.companyId, issue.companyId),
-          sql`${heartbeatRuns.contextSnapshot} ->> 'issueId' = ${issue.id}`,
+          eq(heartbeatRuns.companyId, planner.companyId),
+          eq(heartbeatRuns.runType, "worker"),
+          sql`${heartbeatRuns.contextSnapshot} ->> 'verificationRunId' = ${verification.id}`,
         ),
       )
-      .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
+      .orderBy(asc(heartbeatRuns.createdAt))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    if (existingRetry) return existingRetry;
 
-    const rootRunId =
-      runs.find((run) => run.runType === "planner")?.id ??
-      runs.find((run) => run.graphDepth === 0)?.id ??
-      null;
-    const verificationRuns = runs.filter((run) => run.runType === "verification");
-    const lastVerification = verificationRuns.at(-1) ?? null;
-    const reviewReadyAt =
-      lastVerification?.verificationVerdict === "pass" ? lastVerification.finishedAt ?? null : null;
+    const [retryWorker] = await db
+      .insert(heartbeatRuns)
+      .values({
+        companyId: planner.companyId,
+        agentId: worker.agentId,
+        invocationSource: worker.invocationSource,
+        triggerDetail: worker.triggerDetail,
+        status: "queued",
+        runType: "worker",
+        rootRunId: planner.id,
+        parentRunId: planner.id,
+        graphDepth: (planner.graphDepth ?? 0) + 1,
+        repairAttempt: nextRepairAttempt,
+        policySnapshotJson: verification.policySnapshotJson,
+        contextSnapshot: {
+          ...(worker.contextSnapshot ?? {}),
+          repairSourceRunId: worker.id,
+          verificationRunId: verification.id,
+        },
+      })
+      .returning();
 
-    return {
-      rootRunId,
-      lastVerificationRunId: lastVerification?.id ?? null,
-      reviewReadyAt,
-      evidencePolicy: "code_ci_evaluator_summary",
-      evidencePolicySource: "company_default",
-      nodes: runs.map((run) => ({
-        id: run.id,
-        runType: asRunType(run.runType),
-        status: asRunStatus(run.status),
-        parentRunId: run.parentRunId,
-        rootRunId: run.rootRunId,
-        graphDepth: run.graphDepth,
-        repairAttempt: run.repairAttempt,
-        verificationVerdict: asVerificationVerdict(run.verificationVerdict),
-      })),
-    };
+    return retryWorker;
+  }
+
+  async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
+    return db.transaction(async (tx) => {
+      const scopedEvidence = issueRunEvidenceService(tx as unknown as Db);
+      const issue = await tx
+        .select({
+          id: issues.id,
+          companyId: issues.companyId,
+          assigneeAgentId: issues.assigneeAgentId,
+        })
+        .from(issues)
+        .where(eq(issues.id, issueId))
+        .then((rows) => rows[0] ?? null);
+      if (!issue) throw notFound("Issue not found");
+
+      const runs = await tx
+        .select({
+          id: heartbeatRuns.id,
+          runType: heartbeatRuns.runType,
+          status: heartbeatRuns.status,
+          parentRunId: heartbeatRuns.parentRunId,
+          rootRunId: heartbeatRuns.rootRunId,
+          graphDepth: heartbeatRuns.graphDepth,
+          repairAttempt: heartbeatRuns.repairAttempt,
+          verificationVerdict: heartbeatRuns.verificationVerdict,
+        })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, issue.companyId),
+            sql`${heartbeatRuns.contextSnapshot} ->> 'issueId' = ${issue.id}`,
+          ),
+        )
+        .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
+
+      const evidenceBundle = await scopedEvidence.getIssueEvidenceBundle(issue.id);
+      const rootRunId =
+        runs.find((run) => run.runType === "planner")?.id ??
+        runs.find((run) => run.graphDepth === 0)?.id ??
+        null;
+
+      return {
+        rootRunId,
+        lastVerificationRunId: evidenceBundle.lastVerificationRunId,
+        reviewReadyAt: evidenceBundle.reviewReadyAt,
+        evidencePolicy: evidenceBundle.policy,
+        evidencePolicySource: evidenceBundle.policySource,
+        evidenceBundle,
+        nodes: runs.map((run) => ({
+          id: run.id,
+          runType: asRunType(run.runType),
+          status: asRunStatus(run.status),
+          parentRunId: run.parentRunId,
+          rootRunId: run.rootRunId,
+          graphDepth: run.graphDepth,
+          repairAttempt: run.repairAttempt,
+          verificationVerdict: asVerificationVerdict(run.verificationVerdict),
+        })),
+      };
+    });
   }
 
   return {
     getIssueSummary,
     resolvePlannerGraph,
+    scheduleRepairFromVerification,
     spawnWorkers,
     startPlannerRoot,
   };

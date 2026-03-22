@@ -41,6 +41,7 @@ import {
 import { issueService } from "./issues.js";
 import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
+import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
@@ -702,6 +703,7 @@ export function heartbeatService(db: Db) {
   const issuesSvc = issueService(db);
   const executionWorkspacesSvc = executionWorkspaceService(db);
   const workspaceOperationsSvc = workspaceOperationService(db);
+  const issueRunEvidence = issueRunEvidenceService(db);
   const activeRunExecutions = new Set<string>();
   const budgetHooks = {
     cancelWorkForScope: cancelBudgetScopeWork,
@@ -2307,6 +2309,12 @@ export function heartbeatService(db: Db) {
 
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {
+        if (finalizedRun.runType === "verification") {
+          const verificationOutcome = await issueRunEvidence.syncVerificationOutcome(finalizedRun.id);
+          if (verificationOutcome?.verificationVerdict === "repair") {
+            await issueRunGraph.scheduleRepairFromVerification(finalizedRun.id);
+          }
+        }
         await appendRunEvent(finalizedRun, seq++, {
           eventType: "lifecycle",
           stream: "system",

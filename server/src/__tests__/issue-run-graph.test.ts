@@ -188,4 +188,245 @@ describe("run graph schema contract", () => {
     expect(children).toHaveLength(2);
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
   }, 20_000);
+
+  it("queues a repair worker when verification returns repair and retries remain", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [plannerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [workerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Repair loop issue",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: workerAgent.id,
+    }).returning();
+
+    async function createPlannerRoot(issueId: string) {
+      return graph.startPlannerRoot(issueId, plannerAgent.id);
+    }
+
+    async function createWorkerChild(parentRunId: string, input?: { repairAttempt?: number }) {
+      const [worker] = await db.insert(heartbeatRuns).values({
+        companyId: company.id,
+        agentId: workerAgent.id,
+        status: "succeeded",
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        runType: "worker",
+        rootRunId: parentRunId,
+        parentRunId,
+        graphDepth: 1,
+        repairAttempt: input?.repairAttempt ?? 0,
+        contextSnapshot: {
+          issueId: issue.id,
+          taskKey: "worker-a",
+        },
+      }).returning();
+
+      return worker;
+    }
+
+    async function verifyWorker(workerRunId: string, input: { verdict: "repair" | "pass" | "fail_terminal" }) {
+      const [verification] = await db.insert(heartbeatRuns).values({
+        companyId: company.id,
+        agentId: plannerAgent.id,
+        status: "succeeded",
+        invocationSource: "assignment",
+        triggerDetail: "system",
+        runType: "verification",
+        rootRunId: (await db.select({ rootRunId: heartbeatRuns.rootRunId }).from(heartbeatRuns).where(eq(heartbeatRuns.id, workerRunId)).then((rows) => rows[0]))?.rootRunId ?? null,
+        parentRunId: workerRunId,
+        graphDepth: 2,
+        repairAttempt: input.verdict === "repair" ? 1 : 0,
+        verificationVerdict: input.verdict,
+        contextSnapshot: {
+          issueId: issue.id,
+        },
+      }).returning();
+
+      return verification;
+    }
+
+    const planner = await createPlannerRoot(issue.id);
+    const worker = await createWorkerChild(planner.id, { repairAttempt: 0 });
+    const verification = await verifyWorker(worker.id, { verdict: "repair" });
+
+    const retryWorker = await graph.scheduleRepairFromVerification(verification.id);
+    expect(retryWorker.repairAttempt).toBe(1);
+    expect(retryWorker.parentRunId).toBe(planner.id);
+  }, 20_000);
+
+  it("does not queue duplicate repair workers for the same verification run", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [plannerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [workerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Repair idempotency issue",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: workerAgent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, plannerAgent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: workerAgent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      contextSnapshot: {
+        issueId: issue.id,
+        taskKey: "worker-a",
+      },
+    }).returning();
+    const [verification] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: plannerAgent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "verification",
+      rootRunId: planner.id,
+      parentRunId: worker.id,
+      graphDepth: 2,
+      repairAttempt: 1,
+      verificationVerdict: "repair",
+      contextSnapshot: {
+        issueId: issue.id,
+      },
+    }).returning();
+
+    const firstRetry = await graph.scheduleRepairFromVerification(verification.id);
+    const secondRetry = await graph.scheduleRepairFromVerification(verification.id);
+    const retries = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.parentRunId, planner.id));
+
+    expect(firstRetry?.id).toBe(secondRetry?.id);
+    expect(retries.filter((run) => run.contextSnapshot?.verificationRunId === verification.id)).toHaveLength(1);
+  }, 20_000);
+
+  it("stops scheduling repair workers after the default retry limit is reached", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [plannerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [workerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Repair loop limit issue",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: workerAgent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, plannerAgent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: workerAgent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 3,
+      contextSnapshot: {
+        issueId: issue.id,
+        taskKey: "worker-a",
+      },
+    }).returning();
+
+    const [verification] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: plannerAgent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "verification",
+      rootRunId: planner.id,
+      parentRunId: worker.id,
+      graphDepth: 2,
+      repairAttempt: 3,
+      verificationVerdict: "repair",
+      contextSnapshot: {
+        issueId: issue.id,
+      },
+    }).returning();
+
+    const retryWorker = await graph.scheduleRepairFromVerification(verification.id);
+    const workers = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.runType, "worker"));
+
+    expect(retryWorker).toBeNull();
+    expect(workers).toHaveLength(1);
+  }, 20_000);
 });
