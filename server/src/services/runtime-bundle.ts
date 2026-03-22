@@ -1,9 +1,9 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agents, companies, issues, projects } from "@paperclipai/db";
+import { agents, companies, heartbeatRuns, issues, projects } from "@paperclipai/db";
 import type { RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
-import { resolvePlannedRunnerSnapshot } from "./runner-plane.js";
+import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
 
 type ResolveRuntimeBundleInput = {
   companyId: string;
@@ -30,7 +30,7 @@ export function buildRuntimeBundleProjection(runtime: RuntimeBundleTarget): Runt
 }
 
 export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleInput): Promise<RuntimeBundle> {
-  const [agent, issue, company] = await Promise.all([
+  const [agent, issue, company, run] = await Promise.all([
     db
       .select({
         id: agents.id,
@@ -72,6 +72,16 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       .from(companies)
       .where(eq(companies.id, input.companyId))
       .then((rows) => rows[0] ?? null),
+    input.runId
+      ? db
+          .select({
+            id: heartbeatRuns.id,
+            runType: heartbeatRuns.runType,
+          })
+          .from(heartbeatRuns)
+          .where(eq(heartbeatRuns.id, input.runId))
+          .then((rows) => rows[0] ?? null)
+      : Promise.resolve(null),
   ]);
 
   if (!agent || agent.companyId !== input.companyId) throw notFound("Agent not found");
@@ -123,7 +133,11 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       evidencePolicy: issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"],
       evidencePolicySource: issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"],
     },
-    runner: resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null),
+    runner: applyVerificationRunnerPolicy({
+      planned: resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null),
+      runType: run?.runType ?? null,
+      evidencePolicy: issue.evidencePolicy,
+    }),
     memory: {
       snippets: [
         ...(company?.description

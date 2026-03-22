@@ -64,3 +64,29 @@ export function resolveObservedRunnerSnapshot(input: {
     isolationBoundary: "adapter_runtime",
   };
 }
+
+
+export function applyVerificationRunnerPolicy(input: {
+  planned: RuntimeBundleRunner;
+  runType: string | null;
+  evidencePolicy: string;
+}): RuntimeBundleRunner {
+  if (
+    input.runType === "verification" &&
+    input.evidencePolicy === "code_ci_evaluator_summary_artifacts" &&
+    input.planned.target === "local_host"
+  ) {
+    return {
+      target: "cloud_sandbox",
+      provider: "cloud_sandbox",
+      workspaceStrategyType: input.planned.workspaceStrategyType,
+      executionMode: input.planned.executionMode,
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "cloud_sandbox",
+    };
+  }
+
+  return input.planned;
+}
+

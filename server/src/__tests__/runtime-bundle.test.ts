@@ -140,7 +140,7 @@ describe("resolveRuntimeBundle", () => {
       companyId: company.id,
       issueId: issue.id,
       agentId: agent.id,
-      runId: "run-1",
+      runId: null,
       runtime: "codex",
     });
 

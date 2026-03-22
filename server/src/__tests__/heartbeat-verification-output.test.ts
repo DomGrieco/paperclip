@@ -222,13 +222,13 @@ describe("heartbeat verification output ingestion", () => {
     expect(finalized.status).toBe("succeeded");
     expect(finalized.verificationVerdict).toBe("pass");
     expect(finalized.runnerSnapshotJson).toEqual({
-      target: "local_host",
-      provider: "local_process",
+      target: "cloud_sandbox",
+      provider: "cloud_sandbox",
       workspaceStrategyType: null,
       executionMode: null,
-      browserCapable: false,
-      sandboxed: false,
-      isolationBoundary: "host_process",
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "cloud_sandbox",
     });
     expect(reloadedIssue?.lastVerificationRunId).toBe(verification.id);
     expect(reloadedIssue?.reviewReadyAt).not.toBeNull();
