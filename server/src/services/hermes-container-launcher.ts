@@ -168,6 +168,57 @@ async function dockerApiRequest(input: {
   });
 }
 
+export type DockerContainerMount = {
+  Type?: string;
+  Source?: string;
+  Destination?: string;
+  RW?: boolean;
+};
+
+export function resolveMountSourcePath(input: {
+  containerPath: string;
+  mounts: DockerContainerMount[];
+}): string {
+  const sortedMounts = [...input.mounts]
+    .filter(
+      (mount): mount is DockerContainerMount & { Source: string; Destination: string } =>
+        typeof mount.Source === "string" && typeof mount.Destination === "string",
+    )
+    .sort((a, b) => b.Destination.length - a.Destination.length);
+  for (const mount of sortedMounts) {
+    if (input.containerPath === mount.Destination) return mount.Source;
+    if (input.containerPath.startsWith(`${mount.Destination}/`)) {
+      return `${mount.Source}${input.containerPath.slice(mount.Destination.length)}`;
+    }
+  }
+  throw new Error(`No source mount found for container path ${input.containerPath}`);
+}
+
+async function inspectContainerMounts(containerName: string): Promise<DockerContainerMount[]> {
+  const response = await dockerApiRequest({
+    method: "GET",
+    path: `/containers/${encodeURIComponent(containerName)}/json`,
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(`docker inspect failed (${response.statusCode}): ${response.body}`);
+  }
+  const parsed = JSON.parse(response.body) as { Mounts?: DockerContainerMount[] };
+  return Array.isArray(parsed.Mounts) ? parsed.Mounts : [];
+}
+
+export function buildDockerBindsFromPlan(input: {
+  plan: HermesContainerLaunchPlan;
+  sourceContainerMounts: DockerContainerMount[];
+}): string[] {
+  return input.plan.mounts.map((mount) => {
+    const sourcePath = resolveMountSourcePath({
+      containerPath: mount.hostPath,
+      mounts: input.sourceContainerMounts,
+    });
+    return `${sourcePath}:${mount.containerPath}${mount.readOnly ? ":ro" : ""}`;
+  });
+}
+
 export async function createAndStartHermesContainer(input: {
   runId: string;
   agentId: string;
@@ -177,17 +228,20 @@ export async function createAndStartHermesContainer(input: {
   workspaceCwd: string;
 }): Promise<string> {
   const containerName = buildContainerName({ runId: input.runId, serviceId: input.serviceId });
+  const sourceContainer = process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER || "paperclip-server-1";
+  const sourceContainerMounts = await inspectContainerMounts(sourceContainer);
+  const binds = buildDockerBindsFromPlan({
+    plan: input.plan,
+    sourceContainerMounts,
+  });
   const createResponse = await dockerApiRequest({
     method: "POST",
     path: `/containers/create?name=${encodeURIComponent(containerName)}`,
     body: {
       Image: input.image,
-      WorkingDir: input.workspaceCwd,
+      WorkingDir: input.plan.workingDir,
       Cmd: ["sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 30; done"],
-      Env: [
-        `PAPERCLIP_RUN_ID=${input.runId}`,
-        `PAPERCLIP_AGENT_ID=${input.agentId}`,
-      ],
+      Env: input.plan.env.map((entry) => `${entry.name}=${entry.value}`),
       Labels: {
         "paperclip.runtime_service_id": input.serviceId,
         "paperclip.run_id": input.runId,
@@ -197,7 +251,7 @@ export async function createAndStartHermesContainer(input: {
       HostConfig: {
         AutoRemove: true,
         Init: true,
-        VolumesFrom: [process.env.PAPERCLIP_HERMES_CONTAINER_VOLUMES_FROM || "paperclip-server-1"],
+        Binds: binds,
       },
     },
   });

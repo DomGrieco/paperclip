@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  buildDockerBindsFromPlan,
   buildHermesContainerDockerArgs,
   injectHermesContainerLauncherService,
   isHermesContainerLauncherEnabled,
+  resolveMountSourcePath,
   stableHermesContainerRuntimeServiceId,
 } from "../services/hermes-container-launcher.js";
 
@@ -95,5 +97,61 @@ describe("hermes-container-launcher", () => {
     expect(args).toContain("/tmp/workspace:/workspace");
     expect(args).toContain("-e");
     expect(args).toContain("HERMES_HOME=/home/hermes/.hermes");
+  });
+
+  it("resolves a bind-mount source from a source container mount table", () => {
+    expect(
+      resolveMountSourcePath({
+        containerPath: "/paperclip/instances/default/workspaces/agent-1",
+        mounts: [
+          { Source: "/var/lib/docker/volumes/paperclip-data/_data", Destination: "/paperclip" },
+          { Source: "/Users/eru/.hermes", Destination: "/paperclip/shared/hermes-home-source" },
+        ],
+      }),
+    ).toBe("/var/lib/docker/volumes/paperclip-data/_data/instances/default/workspaces/agent-1");
+  });
+
+  it("builds narrowed bind mounts from the launch plan instead of sharing the whole Paperclip volume", () => {
+    const binds = buildDockerBindsFromPlan({
+      plan: {
+        version: "v1",
+        runner: {
+          target: "hermes_container",
+          provider: "hermes_container",
+          workspaceStrategyType: null,
+          executionMode: null,
+          browserCapable: false,
+          sandboxed: true,
+          isolationBoundary: "container_process",
+        },
+        image: "paperclip-server:latest",
+        command: ["hermes"],
+        workingDir: "/workspace",
+        workspacePath: "/workspace",
+        agentHomePath: "/home/hermes/.hermes",
+        sharedAuthSourcePath: "/paperclip/shared/hermes-home-source",
+        runtimeBundleRoot: "/paperclip/runtime",
+        sharedContextPath: "/workspace/.paperclip/context/shared-context.json",
+        provider: null,
+        model: null,
+        mounts: [
+          { kind: "workspace", hostPath: "/paperclip/instances/default/workspaces/agent-1", containerPath: "/workspace", readOnly: false, purpose: "workspace" },
+          { kind: "agent_home", hostPath: "/paperclip/instances/default/companies/company-1/hermes-home", containerPath: "/home/hermes/.hermes", readOnly: false, purpose: "managed home" },
+          { kind: "shared_auth", hostPath: "/paperclip/shared/hermes-home-source", containerPath: "/paperclip/shared/hermes-home-source", readOnly: true, purpose: "bootstrap source" },
+        ],
+        env: [],
+        runtimeService: { serviceName: "hermes-worker", provider: "hermes_container", scopeType: "run", scopeId: "run-1", ownerAgentId: "agent-1" },
+      },
+      sourceContainerMounts: [
+        { Source: "/var/lib/docker/volumes/paperclip-data/_data", Destination: "/paperclip" },
+        { Source: "/Users/eru/.hermes", Destination: "/paperclip/shared/hermes-home-source" },
+      ],
+    });
+
+    expect(binds).toEqual([
+      "/var/lib/docker/volumes/paperclip-data/_data/instances/default/workspaces/agent-1:/workspace",
+      "/var/lib/docker/volumes/paperclip-data/_data/instances/default/companies/company-1/hermes-home:/home/hermes/.hermes",
+      "/Users/eru/.hermes:/paperclip/shared/hermes-home-source:ro",
+    ]);
   });
 });
