@@ -91,7 +91,11 @@ describe("prepareHermesAdapterConfigForExecution", () => {
   it("injects Paperclip auth/runtime env and materializes runtime files for Hermes", async () => {
     const cwd = await makeTempDir();
     const sharedSource = await makeTempDir();
-    await fs.writeFile(path.join(sharedSource, "auth.json"), '{"provider":"openai-codex"}\n', "utf8");
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
     const nextConfig = await prepareHermesAdapterConfigForExecution({
       config: {
         model: "anthropic/claude-sonnet-4",
@@ -110,25 +114,43 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH).toContain(path.join(".paperclip", "runtime", "instructions.md"));
     expect(env.PAPERCLIP_ISSUE_ID).toBe("issue-1");
     expect(env.PAPERCLIP_PROJECT_ID).toBe("project-1");
+    expect(env.HERMES_HOME).toContain(path.join("agent-home"));
 
     const bundleJson = await fs.readFile(env.PAPERCLIP_RUNTIME_BUNDLE_PATH, "utf8");
-    expect(bundleJson).toContain("\"runtime\": \"hermes\"");
+    expect(bundleJson).toContain('"runtime": "hermes"');
 
     const instructions = await fs.readFile(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH, "utf8");
     expect(instructions).toContain("Paperclip hermes runtime projection");
 
+    const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");
+    expect(copiedAuth).toContain("openai-codex");
+
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
-    expect(String(nextConfig.promptTemplate)).toContain("Authorization: Bearer $PAPERCLIP_API_KEY");
+    expect(String(nextConfig.promptTemplate)).toContain("Authorization: Bearer $PAPER...Y");
+    expect(nextConfig.provider).toBe("openai-codex");
+    expect(nextConfig.model).toBe("gpt-5.3-codex");
   });
 
-  it("prepends the runtime note to an existing custom prompt template", async () => {
+  it("prepends the runtime note to an existing custom prompt template without overwriting explicit credentials", async () => {
     const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
     const nextConfig = await prepareHermesAdapterConfigForExecution({
       config: {
         promptTemplate: "Custom instructions for {{agentName}}",
-        env: { PAPERCLIP_API_KEY: "preset-key" },
+        env: {
+          PAPERCLIP_API_KEY: "preset-key",
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource,
+        },
+        model: "gpt-5.2-codex",
+        provider: "openai-codex",
       },
       cwd,
+      agentHome: path.join(cwd, "agent-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-456",
     });
@@ -137,5 +159,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_API_KEY).toBe("preset-key");
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
     expect(String(nextConfig.promptTemplate)).toContain("Custom instructions for {{agentName}}");
+    expect(nextConfig.provider).toBe("openai-codex");
+    expect(nextConfig.model).toBe("gpt-5.2-codex");
   });
 });

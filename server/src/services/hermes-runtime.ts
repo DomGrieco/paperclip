@@ -6,13 +6,21 @@ import type { RuntimeBundle } from "@paperclipai/shared";
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const SHARED_HERMES_AUTH_FILES = ["auth.json", ".env", "config.yaml"] as const;
+const DEFAULT_CODEX_MODEL = "gpt-5.3-codex";
+const DEFAULT_ANTHROPIC_MODEL = "anthropic/claude-sonnet-4";
+
+type HermesAuthStore = {
+  active_provider?: string;
+  provider?: string;
+  providers?: Record<string, unknown>;
+};
 
 const DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE = `You are "{{agentName}}", a Hermes worker in a Paperclip-managed company.
 
 ${RUNTIME_NOTE_MARKER}
 - Use the \`terminal\` tool with \`curl\` for all Paperclip API calls.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
-- Include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
+- Include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 
 Your Paperclip identity:
@@ -34,7 +42,7 @@ Title: {{taskTitle}}
 2. Use the runtime bundle plus the current task details as your source of truth.
 3. Complete the task using your tools.
 4. When done, update the issue status:
-   \`curl -s -X PATCH "{{paperclipApiUrl}}/issues/{{taskId}}" -H "Authorization: Bearer $PAPERCLIP_API_KEY" -H "Content-Type: application/json" -d '{"status":"done"}'\`
+   \`curl -s -X PATCH "{{paperclipApiUrl}}/issues/{{taskId}}" -H "Authorization: Bearer $PAPER...KEY" -H "Content-Type: application/json" -d '{"status":"done"}'\`
 5. Report what you changed and any evidence/artifacts produced.
 {{/taskId}}
 
@@ -42,13 +50,25 @@ Title: {{taskTitle}}
 ## Heartbeat Wake
 
 1. Check your assigned todo issues:
-   \`curl -s "{{paperclipApiUrl}}/companies/{{companyId}}/issues?assigneeAgentId={{agentId}}&status=todo" -H "Authorization: Bearer $PAPERCLIP_API_KEY" | python3 -m json.tool\`
+   \`curl -s "{{paperclipApiUrl}}/companies/{{companyId}}/issues?assigneeAgentId={{agentId}}&status=todo" -H "Authorization: Bearer $PAPER...KEY" | python3 -m json.tool\`
 2. If an issue is available, pick the highest-priority one, work it, and update its status when complete.
 3. If nothing is assigned, exit briefly and clearly.
 {{/noTask}}`;
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isDefaultLikeModel(model: string | null): boolean {
+  return model === null || model === DEFAULT_ANTHROPIC_MODEL || model === "claude-sonnet-4";
+}
+
+function defaultModelForProvider(provider: string | null): string | null {
+  if (!provider) return null;
+  const normalized = provider.toLowerCase();
+  if (normalized.includes("openai") || normalized.includes("codex")) return DEFAULT_CODEX_MODEL;
+  if (normalized.includes("anthropic") || normalized.includes("claude")) return DEFAULT_ANTHROPIC_MODEL;
+  return null;
 }
 
 function buildPromptTemplate(existingPromptTemplate: string | null): string {
@@ -61,7 +81,7 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
   return `${RUNTIME_NOTE_MARKER}
 - Use the \`terminal\` tool with \`curl\` for all Paperclip API calls.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
-- Include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
+- Include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools.
 
 ${existingPromptTemplate}`;
@@ -76,12 +96,24 @@ async function pathExists(candidate: string): Promise<boolean> {
   }
 }
 
+async function readHermesAuthStore(sharedSource: string): Promise<HermesAuthStore | null> {
+  const authFile = path.join(sharedSource, "auth.json");
+  if (!(await pathExists(authFile))) return null;
+  try {
+    const raw = await fs.readFile(authFile, "utf8");
+    return JSON.parse(raw) as HermesAuthStore;
+  } catch {
+    return null;
+  }
+}
+
 async function syncSharedHermesAuthProfile(input: {
   workerHome: string;
   sharedSource: string;
 }): Promise<void> {
   await fs.mkdir(input.workerHome, { recursive: true });
   if (!(await pathExists(input.sharedSource))) return;
+
   for (const relativeName of SHARED_HERMES_AUTH_FILES) {
     const source = path.join(input.sharedSource, relativeName);
     if (!(await pathExists(source))) continue;
@@ -114,8 +146,24 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   const workerHome = readString(input.agentHome) ?? path.join(input.cwd, ".paperclip", "hermes-home");
   const sharedSource =
     readString(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
+  const authStore = await readHermesAuthStore(sharedSource);
   await syncSharedHermesAuthProfile({ workerHome, sharedSource });
   env.HERMES_HOME = workerHome;
+
+  const currentProvider = readString(input.config.provider);
+  const currentModel = readString(input.config.model);
+  const activeProvider = readString(authStore?.active_provider) ?? readString(authStore?.provider);
+
+  if (!currentProvider && activeProvider) {
+    nextConfig.provider = activeProvider;
+  }
+  if (isDefaultLikeModel(currentModel)) {
+    const providerForDefault = currentProvider ?? activeProvider;
+    const defaultModel = defaultModelForProvider(providerForDefault);
+    if (defaultModel) {
+      nextConfig.model = defaultModel;
+    }
+  }
 
   if (input.runtimeBundle) {
     const materialized = await materializeRuntimeBundleWorkspace({

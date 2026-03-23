@@ -2201,6 +2201,12 @@ export function heartbeatService(db: Db) {
           "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
         );
       }
+      if (agent.adapterType === "hermes_local") {
+        await onLog(
+          "stdout",
+          `[paperclip] Hermes effective config: provider=${String(executionConfig.provider ?? "") || "<unset>"} model=${String(executionConfig.model ?? "") || "<unset>"} HERMES_HOME=${String(parseObject(executionConfig.env).HERMES_HOME ?? "") || "<unset>"}\n`,
+        );
+      }
       const adapterResult = await adapter.execute({
         runId: run.id,
         agent,
