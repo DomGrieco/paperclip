@@ -91,6 +91,7 @@ async function hermesTestEnvironmentWithResolvedConfig(ctx: {
   const resolvedConfig = await prepareHermesAdapterConfigForExecution({
     config: ctx.config,
     cwd,
+    companyId: ctx.companyId,
     runtimeBundle: null,
     authToken: null,
   });

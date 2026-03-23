@@ -62,6 +62,19 @@ export function resolveDefaultAgentWorkspaceDir(agentId: string): string {
   return path.resolve(resolvePaperclipInstanceRoot(), "workspaces", trimmed);
 }
 
+export function resolveCompanyHermesHomeDir(companyId: string): string {
+  const trimmed = companyId.trim();
+  if (!trimmed) {
+    throw new Error("Managed Hermes home path requires companyId.");
+  }
+  return path.resolve(
+    resolvePaperclipInstanceRoot(),
+    "companies",
+    sanitizeFriendlyPathSegment(trimmed, "company"),
+    "hermes-home",
+  );
+}
+
 function sanitizeFriendlyPathSegment(value: string | null | undefined, fallback = "_default"): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return fallback;

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import type { RuntimeBundle } from "@paperclipai/shared";
+import { resolveCompanyHermesHomeDir } from "../home-paths.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
@@ -268,7 +269,8 @@ async function syncSharedHermesAuthProfile(input: {
 export async function prepareHermesAdapterConfigForExecution(input: {
   config: Record<string, unknown>;
   cwd: string;
-  agentHome?: string | null;
+  companyId?: string | null;
+  managedHome?: string | null;
   runtimeBundle: RuntimeBundle | null;
   authToken?: string | null;
 }): Promise<Record<string, unknown>> {
@@ -285,12 +287,15 @@ export async function prepareHermesAdapterConfigForExecution(input: {
     env.PAPERCLIP_API_KEY = readString(input.authToken)!;
   }
 
-  const workerHome = readString(input.agentHome) ?? path.join(input.cwd, ".paperclip", "hermes-home");
+  const managedHome =
+    readString(input.managedHome) ??
+    (readString(input.companyId) ? resolveCompanyHermesHomeDir(readString(input.companyId)!) : null) ??
+    path.join(input.cwd, ".paperclip", "hermes-home");
   const sharedSource =
     readString(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
-  const authStore = await readHermesAuthStore(sharedSource);
-  await syncSharedHermesAuthProfile({ workerHome, sharedSource });
-  env.HERMES_HOME = workerHome;
+  await syncSharedHermesAuthProfile({ workerHome: managedHome, sharedSource });
+  const authStore = (await readHermesAuthStore(managedHome)) ?? (managedHome !== sharedSource ? await readHermesAuthStore(sharedSource) : null);
+  env.HERMES_HOME = managedHome;
   env.TERMINAL_CWD = input.cwd;
 
   const currentProvider = readString(input.config.provider);

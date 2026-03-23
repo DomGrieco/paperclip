@@ -115,7 +115,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         env: { PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource },
       },
       cwd,
-      agentHome: path.join(cwd, "agent-home"),
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-123",
     });
@@ -131,7 +132,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"version\":\"v1\"");
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
-    expect(env.HERMES_HOME).toContain(path.join("agent-home"));
+    expect(env.HERMES_HOME).toContain(path.join("company-hermes-home"));
 
     const bundleJson = await fs.readFile(env.PAPERCLIP_RUNTIME_BUNDLE_PATH, "utf8");
     expect(bundleJson).toContain('"runtime": "hermes"');
@@ -204,7 +205,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         provider: "openai-codex",
       },
       cwd,
-      agentHome: path.join(cwd, "agent-home"),
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-456",
     });

@@ -27,7 +27,7 @@ import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } fr
 import { costService } from "./costs.js";
 import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService } from "./secrets.js";
-import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
+import { resolveCompanyHermesHomeDir, resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
 import {
   buildWorkspaceReadyComment,
@@ -1945,6 +1945,7 @@ export function heartbeatService(db: Db) {
       branchName: executionWorkspace.branchName,
       worktreePath: executionWorkspace.worktreePath,
       agentHome: resolveDefaultAgentWorkspaceDir(agent.id),
+      hermesHome: resolveCompanyHermesHomeDir(agent.companyId),
     };
     context.paperclipWorkspaces = resolvedWorkspace.workspaceHints;
     const runtimeServiceIntents = (() => {
@@ -1981,7 +1982,8 @@ export function heartbeatService(db: Db) {
         ? await prepareHermesAdapterConfigForExecution({
             config: resolvedConfig,
             cwd: executionWorkspace.cwd,
-            agentHome: readNonEmptyString(parseObject(context.paperclipWorkspace).agentHome) ?? null,
+            companyId: agent.companyId,
+            managedHome: readNonEmptyString(parseObject(context.paperclipWorkspace).hermesHome) ?? null,
             runtimeBundle,
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
           })
