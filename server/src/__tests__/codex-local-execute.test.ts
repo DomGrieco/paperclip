@@ -9,10 +9,16 @@ async function writeFakeCodexCommand(commandPath: string): Promise<void> {
 const fs = require("node:fs");
 
 const capturePath = process.env.PAPERCLIP_TEST_CAPTURE_PATH;
+const bundlePath = process.env.PAPERCLIP_RUNTIME_BUNDLE_PATH || null;
+const runtimeRoot = process.env.PAPERCLIP_RUNTIME_ROOT || null;
 const payload = {
   argv: process.argv.slice(2),
   prompt: fs.readFileSync(0, "utf8"),
   codexHome: process.env.CODEX_HOME || null,
+  runtimeRoot,
+  bundlePath,
+  bundleJson: bundlePath ? JSON.parse(fs.readFileSync(bundlePath, "utf8")) : null,
+  policyJson: runtimeRoot ? JSON.parse(fs.readFileSync(require("node:path").join(runtimeRoot, "policy.json"), "utf8")) : null,
   paperclipEnvKeys: Object.keys(process.env)
     .filter((key) => key.startsWith("PAPERCLIP_"))
     .sort(),
@@ -32,6 +38,10 @@ type CapturePayload = {
   argv: string[];
   prompt: string;
   codexHome: string | null;
+  runtimeRoot: string | null;
+  bundlePath: string | null;
+  bundleJson: Record<string, unknown> | null;
+  policyJson: Record<string, unknown> | null;
   paperclipEnvKeys: string[];
 };
 
@@ -91,7 +101,22 @@ describe("codex execute", () => {
           },
           promptTemplate: "Follow the paperclip heartbeat.",
         },
-        context: {},
+        context: {
+          paperclipRuntimeBundle: {
+            runtime: "codex",
+            company: { id: "company-1" },
+            agent: { id: "agent-1", name: "Codex Coder", adapterType: "codex_local" },
+            project: null,
+            issue: { id: "issue-1", identifier: "TST-1", title: "Materialize runtime bundle", status: "in_progress", priority: "high" },
+            run: { id: "run-1", runType: "worker", rootRunId: "run-0", parentRunId: "run-0", graphDepth: 1, repairAttempt: 0, verificationVerdict: null },
+            policy: { tddMode: "required", evidencePolicy: "code_ci_evaluator_summary", evidencePolicySource: "company_default", maxRepairAttempts: 3, requiresHumanArtifacts: false },
+            runner: { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" },
+            verification: { required: true, requiresEvaluatorSummary: true, requiresArtifacts: false, latestVerificationRunId: null, reviewReadyAt: null, runner: { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" } },
+            memory: { snippets: [{ scope: "issue", source: "issue.description", content: "Use the runtime bundle files." }] },
+            projection: { runtime: "codex", contextKey: "paperclipRuntimeBundle", envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON", materializationRoot: ".paperclip/runtime" },
+          },
+          paperclipRuntimeProjection: { runtime: "codex", contextKey: "paperclipRuntimeBundle", envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON", materializationRoot: ".paperclip/runtime" },
+        },
         authToken: "run-jwt-token",
         onLog: async (stream, chunk) => {
           logs.push({ stream, chunk });
@@ -112,8 +137,14 @@ describe("codex execute", () => {
           "PAPERCLIP_API_URL",
           "PAPERCLIP_COMPANY_ID",
           "PAPERCLIP_RUN_ID",
+          "PAPERCLIP_RUNTIME_BUNDLE_PATH",
+          "PAPERCLIP_RUNTIME_ROOT",
         ]),
       );
+      expect(capture.runtimeRoot).toBe(path.join(workspace, ".paperclip", "runtime"));
+      expect(capture.bundlePath).toBe(path.join(workspace, ".paperclip", "runtime", "bundle.json"));
+      expect(capture.bundleJson?.runtime).toBe("codex");
+      expect(capture.policyJson?.evidencePolicy).toBe("code_ci_evaluator_summary");
 
       const isolatedAuth = path.join(isolatedCodexHome, "auth.json");
       const isolatedConfig = path.join(isolatedCodexHome, "config.toml");

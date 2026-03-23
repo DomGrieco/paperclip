@@ -11,6 +11,7 @@ import {
   buildPaperclipEnv,
   redactEnvForLogs,
   ensureAbsoluteDirectory,
+  materializeRuntimeBundleWorkspace,
   ensureCommandResolvable,
   ensurePaperclipSkillSymlink,
   ensurePathInEnv,
@@ -224,6 +225,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? path.resolve(envConfig.CODEX_HOME.trim())
       : null;
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
+  const runtimeBundleMaterialization = await materializeRuntimeBundleWorkspace({
+    cwd,
+    materializationRoot:
+      typeof context.paperclipRuntimeProjection === "object" && context.paperclipRuntimeProjection !== null && !Array.isArray(context.paperclipRuntimeProjection)
+        ? asString((context.paperclipRuntimeProjection as Record<string, unknown>).materializationRoot, ".paperclip/runtime")
+        : ".paperclip/runtime",
+    runtimeBundle: context.paperclipRuntimeBundle,
+  });
   const preparedWorktreeCodexHome =
     configuredCodexHome ? null : await prepareWorktreeCodexHome(process.env, onLog);
   const effectiveCodexHome = configuredCodexHome ?? preparedWorktreeCodexHome;
@@ -238,6 +247,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     env.CODEX_HOME = effectiveCodexHome;
   }
   env.PAPERCLIP_RUN_ID = runId;
+  if (runtimeBundleMaterialization) {
+    env.PAPERCLIP_RUNTIME_ROOT = runtimeBundleMaterialization.root;
+    env.PAPERCLIP_RUNTIME_BUNDLE_PATH = runtimeBundleMaterialization.bundlePath;
+  }
   const wakeTaskId =
     (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
     (typeof context.issueId === "string" && context.issueId.trim().length > 0 && context.issueId.trim()) ||

@@ -130,6 +130,56 @@ export function redactEnvForLogs(env: Record<string, string>): Record<string, st
   return redacted;
 }
 
+
+export interface RuntimeBundleMaterializationResult {
+  root: string;
+  bundlePath: string;
+}
+
+export async function materializeRuntimeBundleWorkspace(input: {
+  cwd: string;
+  materializationRoot?: string | null;
+  runtimeBundle: unknown;
+}): Promise<RuntimeBundleMaterializationResult | null> {
+  if (!input.runtimeBundle || typeof input.runtimeBundle !== "object" || Array.isArray(input.runtimeBundle)) {
+    return null;
+  }
+
+  const relativeRoot = (input.materializationRoot ?? ".paperclip/runtime").trim() || ".paperclip/runtime";
+  const root = path.resolve(input.cwd, relativeRoot);
+  await fs.mkdir(root, { recursive: true });
+
+  const bundle = input.runtimeBundle as Record<string, unknown>;
+  const files: Array<[string, unknown]> = [
+    ["bundle.json", bundle],
+    ["policy.json", parseObject(bundle.policy)],
+    ["memory.json", parseObject(bundle.memory)],
+    ["runner.json", parseObject(bundle.runner)],
+    ["run.json", parseObject(bundle.run)],
+    ["verification.json", parseObject(bundle.verification)],
+    ["issue.json", parseObject(bundle.issue)],
+    ["project.json", parseObject(bundle.project)],
+    ["agent.json", parseObject(bundle.agent)],
+    ["company.json", parseObject(bundle.company)],
+    ["projection.json", parseObject(bundle.projection)],
+  ];
+
+  await Promise.all(
+    files.map(([name, value]) =>
+      fs.writeFile(
+        path.join(root, name),
+        JSON.stringify(value ?? null, null, 2) + "\n",
+        "utf8",
+      ),
+    ),
+  );
+
+  return {
+    root,
+    bundlePath: path.join(root, "bundle.json"),
+  };
+}
+
 export function buildPaperclipEnv(agent: { id: string; companyId: string }): Record<string, string> {
   const resolveHostForUrl = (rawHost: string): string => {
     const host = rawHost.trim();
