@@ -194,7 +194,10 @@ export function resolveMountSourcePath(input: {
   throw new Error(`No source mount found for container path ${input.containerPath}`);
 }
 
-async function inspectContainerMounts(containerName: string): Promise<DockerContainerMount[]> {
+async function inspectContainerDetails(containerName: string): Promise<{
+  mounts: DockerContainerMount[];
+  networkNames: string[];
+}> {
   const response = await dockerApiRequest({
     method: "GET",
     path: `/containers/${encodeURIComponent(containerName)}/json`,
@@ -202,8 +205,13 @@ async function inspectContainerMounts(containerName: string): Promise<DockerCont
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw new Error(`docker inspect failed (${response.statusCode}): ${response.body}`);
   }
-  const parsed = JSON.parse(response.body) as { Mounts?: DockerContainerMount[] };
-  return Array.isArray(parsed.Mounts) ? parsed.Mounts : [];
+  const parsed = JSON.parse(response.body) as {
+    Mounts?: DockerContainerMount[];
+    NetworkSettings?: { Networks?: Record<string, unknown> };
+  };
+  const mounts = Array.isArray(parsed.Mounts) ? parsed.Mounts : [];
+  const networkNames = parsed.NetworkSettings?.Networks ? Object.keys(parsed.NetworkSettings.Networks) : [];
+  return { mounts, networkNames };
 }
 
 export function buildDockerBindsFromPlan(input: {
@@ -229,16 +237,18 @@ export async function createAndStartHermesContainer(input: {
 }): Promise<string> {
   const containerName = buildContainerName({ runId: input.runId, serviceId: input.serviceId });
   const sourceContainer = process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER || "paperclip-server-1";
-  const sourceContainerMounts = await inspectContainerMounts(sourceContainer);
+  const sourceContainerDetails = await inspectContainerDetails(sourceContainer);
   const binds = buildDockerBindsFromPlan({
     plan: input.plan,
-    sourceContainerMounts,
+    sourceContainerMounts: sourceContainerDetails.mounts,
   });
+  const networkMode = sourceContainerDetails.networkNames[0] ?? null;
   const createResponse = await dockerApiRequest({
     method: "POST",
     path: `/containers/create?name=${encodeURIComponent(containerName)}`,
     body: {
       Image: input.image,
+      User: "0:0",
       WorkingDir: input.plan.workingDir,
       Cmd: ["sh", "-lc", "trap 'exit 0' TERM INT; while :; do sleep 30; done"],
       Env: input.plan.env.map((entry) => `${entry.name}=${entry.value}`),
@@ -252,6 +262,7 @@ export async function createAndStartHermesContainer(input: {
         AutoRemove: true,
         Init: true,
         Binds: binds,
+        ...(networkMode ? { NetworkMode: networkMode } : {}),
       },
     },
   });

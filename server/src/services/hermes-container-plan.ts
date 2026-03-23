@@ -6,7 +6,7 @@ const DEFAULT_HERMES_CONTAINER_IMAGE = "paperclip/hermes-worker:dev";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const CONTAINER_WORKSPACE_ROOT = "/workspace";
 const CONTAINER_AGENT_HOME_ROOT = "/home/hermes/.hermes";
-const CONTAINER_RUNTIME_ROOT = "/paperclip/runtime";
+const CONTAINER_RUNTIME_ROOT = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "runtime");
 const CONTAINER_SHARED_AUTH_ROOT = "/paperclip/shared/hermes-home-source";
 const CONTAINER_SHARED_CONTEXT_PATH = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "context", "shared-context.json");
 

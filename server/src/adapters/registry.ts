@@ -68,6 +68,7 @@ import {
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
 import { prepareHermesAdapterConfigForExecution } from "../services/hermes-runtime.js";
+import { executeHermesInContainer } from "../services/hermes-container-execution.js";
 import { buildHermesContainerBridgeRuntimeServices } from "../services/hermes-container-bridge.js";
 import { isHermesContainerLauncherEnabled } from "../services/hermes-container-launcher.js";
 import { listHermesModels } from "./hermes-models.js";
@@ -221,8 +222,10 @@ const piLocalAdapter: ServerAdapterModule = {
 const hermesLocalAdapter: ServerAdapterModule = {
   type: "hermes_local",
   execute: async (ctx) => {
+    if (isHermesContainerLauncherEnabled(ctx.config)) {
+      return await executeHermesInContainer(ctx);
+    }
     const result = await hermesExecute(ctx);
-    if (isHermesContainerLauncherEnabled(ctx.config)) return result;
     const bridgeRuntimeServices = buildHermesContainerBridgeRuntimeServices(ctx);
     if (bridgeRuntimeServices.length === 0) return result;
     return {
