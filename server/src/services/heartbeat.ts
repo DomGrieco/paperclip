@@ -44,6 +44,7 @@ import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
+import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import {
@@ -1984,6 +1985,17 @@ export function heartbeatService(db: Db) {
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
           })
         : resolvedConfig;
+    if (agent.adapterType === "hermes_local") {
+      context.paperclipHermesContainerPlan = buildHermesContainerLaunchPlan({
+        runId: run.id,
+        agentId: agent.id,
+        executionWorkspaceCwd: executionWorkspace.cwd,
+        executionConfig,
+        runtimeBundle,
+      });
+    } else {
+      delete context.paperclipHermesContainerPlan;
+    }
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       taskSessionForRun?.sessionDisplayId ??

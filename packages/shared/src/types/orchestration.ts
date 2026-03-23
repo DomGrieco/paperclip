@@ -68,6 +68,50 @@ export interface RuntimeBundleRunner {
   isolationBoundary: "host_process" | "adapter_runtime" | "container_process" | "cloud_sandbox";
 }
 
+export interface HermesContainerMountPlan {
+  kind: "workspace" | "agent_home" | "runtime_bundle" | "shared_auth";
+  hostPath: string;
+  containerPath: string;
+  readOnly: boolean;
+  purpose: string;
+}
+
+export interface HermesContainerEnvPlan {
+  name: string;
+  value: string;
+  secret: boolean;
+  source:
+    | "paperclip_runtime"
+    | "resolved_config"
+    | "runtime_bundle"
+    | "shared_auth"
+    | "worker_home";
+}
+
+export interface HermesContainerLaunchPlan {
+  version: "v1";
+  runner: RuntimeBundleRunner;
+  image: string;
+  command: string[];
+  workingDir: string;
+  workspacePath: string;
+  agentHomePath: string;
+  sharedAuthSourcePath: string | null;
+  runtimeBundleRoot: string | null;
+  sharedContextPath: string | null;
+  provider: string | null;
+  model: string | null;
+  mounts: HermesContainerMountPlan[];
+  env: HermesContainerEnvPlan[];
+  runtimeService: {
+    serviceName: string;
+    provider: "hermes_container";
+    scopeType: "run";
+    scopeId: string;
+    ownerAgentId: string;
+  };
+}
+
 export interface RuntimeBundleProjection {
   runtime: RuntimeBundleTarget;
   contextKey: string;
