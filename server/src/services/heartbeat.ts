@@ -45,6 +45,7 @@ import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
+import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import {
@@ -1985,17 +1986,24 @@ export function heartbeatService(db: Db) {
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
           })
         : resolvedConfig;
-    if (agent.adapterType === "hermes_local") {
-      context.paperclipHermesContainerPlan = buildHermesContainerLaunchPlan({
-        runId: run.id,
-        agentId: agent.id,
-        executionWorkspaceCwd: executionWorkspace.cwd,
-        executionConfig,
-        runtimeBundle,
-      });
+    const hermesContainerPlan = agent.adapterType === "hermes_local"
+      ? buildHermesContainerLaunchPlan({
+          runId: run.id,
+          agentId: agent.id,
+          executionWorkspaceCwd: executionWorkspace.cwd,
+          executionConfig,
+          runtimeBundle,
+        })
+      : null;
+    if (hermesContainerPlan) {
+      context.paperclipHermesContainerPlan = hermesContainerPlan;
     } else {
       delete context.paperclipHermesContainerPlan;
     }
+    const executionConfigWithRuntimeLaunch = injectHermesContainerLauncherService({
+      config: executionConfig,
+      plan: hermesContainerPlan,
+    });
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       taskSessionForRun?.sessionDisplayId ??
@@ -2150,7 +2158,7 @@ export function heartbeatService(db: Db) {
         issue: issueRef,
         workspace: executionWorkspace,
         executionWorkspaceId: persistedExecutionWorkspace?.id ?? issueRef?.executionWorkspaceId ?? null,
-        config: executionConfig,
+        config: executionConfigWithRuntimeLaunch,
         adapterEnv,
         onLog,
       });

@@ -35,6 +35,7 @@ services:
 
   server:
     build: .
+    user: root
     ports:
       - "3100:3100"
     environment:
@@ -45,9 +46,13 @@ services:
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
+      PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
+      PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
     volumes:
       - paperclip-data:/paperclip
       - ${HOME}/.hermes:/paperclip/shared/hermes-home-source:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker:/usr/local/bin/docker:ro
     depends_on:
       db:
         condition: service_healthy
@@ -73,7 +78,9 @@ services:
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
-    user: node
+      PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
+      PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
+    user: root
     ports:
       - "3100:3100"
     volumes:
@@ -81,6 +88,8 @@ services:
       - paperclip-node-modules:/workspace/node_modules
       - paperclip-pnpm-store:/pnpm/store
       - paperclip-data:/paperclip
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker:/usr/local/bin/docker:ro
     depends_on:
       db:
         condition: service_healthy
