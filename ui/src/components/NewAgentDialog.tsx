@@ -61,7 +61,7 @@ const ADVANCED_ADAPTER_OPTIONS: Array<{
   },
   {
     value: "hermes_local",
-    label: "Hermes",
+    label: "Hermes (Paperclip-managed)",
     icon: Bot,
     desc: "Local Hermes agent",
   },
