@@ -68,6 +68,7 @@ import {
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
 import { prepareHermesAdapterConfigForExecution } from "../services/hermes-runtime.js";
+import { listHermesModels } from "./hermes-models.js";
 
 async function pathExists(candidate: string): Promise<boolean> {
   try {
@@ -220,6 +221,7 @@ const hermesLocalAdapter: ServerAdapterModule = {
   testEnvironment: hermesTestEnvironmentWithResolvedConfig,
   sessionCodec: hermesSessionCodec,
   models: hermesModels,
+  listModels: listHermesModels,
   supportsLocalAgentJwt: true,
   agentConfigurationDoc: hermesAgentConfigurationDoc,
 };

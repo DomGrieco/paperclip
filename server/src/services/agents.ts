@@ -15,6 +15,7 @@ import {
 import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
+import { normalizeHermesAdapterConfigForDisplay } from "../adapters/hermes-models.js";
 import { REDACTED_EVENT_VALUE, sanitizeRecord } from "../redaction.js";
 
 function hashToken(token: string) {
@@ -73,10 +74,14 @@ function jsonEqual(left: unknown, right: unknown): boolean {
 function buildConfigSnapshot(
   row: Pick<typeof agents.$inferSelect, ConfigRevisionField>,
 ): AgentConfigSnapshot {
-  const adapterConfig =
+  const rawAdapterConfig =
     typeof row.adapterConfig === "object" && row.adapterConfig !== null && !Array.isArray(row.adapterConfig)
       ? sanitizeRecord(row.adapterConfig as Record<string, unknown>)
       : {};
+  const adapterConfig =
+    row.adapterType === "hermes_local"
+      ? normalizeHermesAdapterConfigForDisplay(rawAdapterConfig)
+      : rawAdapterConfig;
   const runtimeConfig =
     typeof row.runtimeConfig === "object" && row.runtimeConfig !== null && !Array.isArray(row.runtimeConfig)
       ? sanitizeRecord(row.runtimeConfig as Record<string, unknown>)
@@ -200,8 +205,18 @@ export function agentService(db: Db) {
   }
 
   function normalizeAgentRow(row: typeof agents.$inferSelect) {
+    const normalizedAdapterConfig =
+      row.adapterType === "hermes_local" &&
+      typeof row.adapterConfig === "object" &&
+      row.adapterConfig !== null &&
+      !Array.isArray(row.adapterConfig)
+        ? normalizeHermesAdapterConfigForDisplay(
+            sanitizeRecord(row.adapterConfig as Record<string, unknown>),
+          )
+        : row.adapterConfig;
     return withUrlKey({
       ...row,
+      adapterConfig: normalizedAdapterConfig,
       permissions: normalizeAgentPermissions(row.permissions, row.role),
     });
   }
