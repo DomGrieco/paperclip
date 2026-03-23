@@ -134,6 +134,64 @@ export function redactEnvForLogs(env: Record<string, string>): Record<string, st
 export interface RuntimeBundleMaterializationResult {
   root: string;
   bundlePath: string;
+  instructionsPath: string;
+}
+
+
+function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): string {
+  const projection = parseObject(bundle.projection);
+  const runtime = asString(projection.runtime, "runtime");
+  const issue = parseObject(bundle.issue);
+  const policy = parseObject(bundle.policy);
+  const runner = parseObject(bundle.runner);
+  const verification = parseObject(bundle.verification);
+  const memory = parseObject(bundle.memory);
+  const snippets = Array.isArray(memory.snippets)
+    ? memory.snippets.filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null)
+    : [];
+
+  const lines = [
+    `# Paperclip ${runtime} runtime projection`,
+    "",
+    "Start by reading the canonical JSON files in this directory, especially bundle.json, policy.json, runner.json, and verification.json.",
+    "",
+    "## Issue",
+    `- id: ${asString(issue.id, "unknown")}`,
+    `- identifier: ${asString(issue.identifier, "unknown")}`,
+    `- title: ${asString(issue.title, "unknown")}`,
+    `- status: ${asString(issue.status, "unknown")}`,
+    "",
+    "## Policy",
+    `- tddMode: ${asString(policy.tddMode, "required")}`,
+    `- evidencePolicy: ${asString(policy.evidencePolicy, "unknown")}`,
+    `- maxRepairAttempts: ${String(policy.maxRepairAttempts ?? "unknown")}`,
+    `- requiresHumanArtifacts: ${String(policy.requiresHumanArtifacts ?? false)}`,
+    "",
+    "## Runner",
+    `- target: ${asString(runner.target, "unknown")}`,
+    `- browserCapable: ${String(runner.browserCapable ?? false)}`,
+    `- sandboxed: ${String(runner.sandboxed ?? false)}`,
+    "",
+    "## Verification",
+    `- required: ${String(verification.required ?? true)}`,
+    `- requiresEvaluatorSummary: ${String(verification.requiresEvaluatorSummary ?? true)}`,
+    `- requiresArtifacts: ${String(verification.requiresArtifacts ?? false)}`,
+    "",
+    "## Memory recall",
+  ];
+
+  if (snippets.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const snippet of snippets.slice(0, 8)) {
+      lines.push(
+        `- [${asString(snippet.scope, "unknown")}] ${asString(snippet.source, "unknown")}: ${asString(snippet.content, "")}`,
+      );
+    }
+  }
+
+  lines.push("", "## Operator note", "Use these files as the Paperclip control-plane source of truth for this run.");
+  return lines.join("\n") + "\n";
 }
 
 export async function materializeRuntimeBundleWorkspace(input: {
@@ -150,6 +208,11 @@ export async function materializeRuntimeBundleWorkspace(input: {
   await fs.mkdir(root, { recursive: true });
 
   const bundle = input.runtimeBundle as Record<string, unknown>;
+  const runtime = asString(parseObject(bundle.projection).runtime, "runtime");
+  const instructionsPath = path.join(root, "instructions.md");
+  const runtimeInstructionsPath = path.join(root, runtime, "instructions.md");
+  await fs.mkdir(path.dirname(runtimeInstructionsPath), { recursive: true });
+
   const files: Array<[string, unknown]> = [
     ["bundle.json", bundle],
     ["policy.json", parseObject(bundle.policy)],
@@ -164,19 +227,22 @@ export async function materializeRuntimeBundleWorkspace(input: {
     ["projection.json", parseObject(bundle.projection)],
   ];
 
-  await Promise.all(
-    files.map(([name, value]) =>
+  await Promise.all([
+    ...files.map(([name, value]) =>
       fs.writeFile(
         path.join(root, name),
         JSON.stringify(value ?? null, null, 2) + "\n",
         "utf8",
       ),
     ),
-  );
+    fs.writeFile(instructionsPath, buildRuntimeProjectionInstructions(bundle), "utf8"),
+    fs.writeFile(runtimeInstructionsPath, buildRuntimeProjectionInstructions(bundle), "utf8"),
+  ]);
 
   return {
     root,
     bundlePath: path.join(root, "bundle.json"),
+    instructionsPath,
   };
 }
 

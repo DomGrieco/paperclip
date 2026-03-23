@@ -11,12 +11,15 @@ const fs = require("node:fs");
 const capturePath = process.env.PAPERCLIP_TEST_CAPTURE_PATH;
 const bundlePath = process.env.PAPERCLIP_RUNTIME_BUNDLE_PATH || null;
 const runtimeRoot = process.env.PAPERCLIP_RUNTIME_ROOT || null;
+const instructionsPath = process.env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH || null;
 const payload = {
   argv: process.argv.slice(2),
   prompt: fs.readFileSync(0, "utf8"),
   codexHome: process.env.CODEX_HOME || null,
   runtimeRoot,
   bundlePath,
+  instructionsPath,
+  instructionsMarkdown: instructionsPath ? fs.readFileSync(instructionsPath, "utf8") : null,
   bundleJson: bundlePath ? JSON.parse(fs.readFileSync(bundlePath, "utf8")) : null,
   policyJson: runtimeRoot ? JSON.parse(fs.readFileSync(require("node:path").join(runtimeRoot, "policy.json"), "utf8")) : null,
   paperclipEnvKeys: Object.keys(process.env)
@@ -40,6 +43,8 @@ type CapturePayload = {
   codexHome: string | null;
   runtimeRoot: string | null;
   bundlePath: string | null;
+  instructionsPath: string | null;
+  instructionsMarkdown: string | null;
   bundleJson: Record<string, unknown> | null;
   policyJson: Record<string, unknown> | null;
   paperclipEnvKeys: string[];
@@ -138,11 +143,15 @@ describe("codex execute", () => {
           "PAPERCLIP_COMPANY_ID",
           "PAPERCLIP_RUN_ID",
           "PAPERCLIP_RUNTIME_BUNDLE_PATH",
+          "PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH",
           "PAPERCLIP_RUNTIME_ROOT",
         ]),
       );
       expect(capture.runtimeRoot).toBe(path.join(workspace, ".paperclip", "runtime"));
       expect(capture.bundlePath).toBe(path.join(workspace, ".paperclip", "runtime", "bundle.json"));
+      expect(capture.instructionsPath).toBe(path.join(workspace, ".paperclip", "runtime", "instructions.md"));
+      expect(capture.instructionsMarkdown).toContain("# Paperclip codex runtime projection");
+      expect(capture.instructionsMarkdown).toContain("Materialize runtime bundle");
       expect(capture.bundleJson?.runtime).toBe("codex");
       expect(capture.policyJson?.evidencePolicy).toBe("code_ci_evaluator_summary");
 

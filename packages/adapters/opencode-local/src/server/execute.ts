@@ -137,6 +137,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (runtimeBundleMaterialization) {
     env.PAPERCLIP_RUNTIME_ROOT = runtimeBundleMaterialization.root;
     env.PAPERCLIP_RUNTIME_BUNDLE_PATH = runtimeBundleMaterialization.bundlePath;
+    env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH = runtimeBundleMaterialization.instructionsPath;
   }
   const wakeTaskId =
     (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
@@ -272,10 +273,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       ? renderTemplate(bootstrapPromptTemplate, templateData).trim()
       : "";
   const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
+  const runtimeInstructionsNote = typeof env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH === "string" && env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH.trim().length > 0
+    ? `Paperclip runtime files are materialized in ${env.PAPERCLIP_RUNTIME_ROOT}. Start by reading ${env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH}.`
+    : "";
   const prompt = joinPromptSections([
     instructionsPrefix,
     renderedBootstrapPrompt,
     sessionHandoffNote,
+    runtimeInstructionsNote,
     renderedPrompt,
   ]);
   const promptMetrics = {

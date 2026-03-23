@@ -11,11 +11,14 @@ const fs = require("node:fs");
 const capturePath = process.env.PAPERCLIP_TEST_CAPTURE_PATH;
 const bundlePath = process.env.PAPERCLIP_RUNTIME_BUNDLE_PATH || null;
 const runtimeRoot = process.env.PAPERCLIP_RUNTIME_ROOT || null;
+const instructionsPath = process.env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH || null;
 const payload = {
   argv: process.argv.slice(2),
   prompt: fs.readFileSync(0, "utf8"),
   runtimeRoot,
   bundlePath,
+  instructionsPath,
+  instructionsMarkdown: instructionsPath ? fs.readFileSync(instructionsPath, "utf8") : null,
   bundleJson: bundlePath ? JSON.parse(fs.readFileSync(bundlePath, "utf8")) : null,
   verificationJson: runtimeRoot ? JSON.parse(fs.readFileSync(require("node:path").join(runtimeRoot, "verification.json"), "utf8")) : null,
   paperclipEnvKeys: Object.keys(process.env)
@@ -51,6 +54,8 @@ type CapturePayload = {
   prompt: string;
   runtimeRoot: string | null;
   bundlePath: string | null;
+  instructionsPath: string | null;
+  instructionsMarkdown: string | null;
   bundleJson: Record<string, unknown> | null;
   verificationJson: Record<string, unknown> | null;
   paperclipEnvKeys: string[];
@@ -132,11 +137,15 @@ describe("cursor execute", () => {
           "PAPERCLIP_COMPANY_ID",
           "PAPERCLIP_RUN_ID",
           "PAPERCLIP_RUNTIME_BUNDLE_PATH",
+          "PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH",
           "PAPERCLIP_RUNTIME_ROOT",
         ]),
       );
       expect(capture.runtimeRoot).toBe(path.join(workspace, ".paperclip", "runtime"));
       expect(capture.bundlePath).toBe(path.join(workspace, ".paperclip", "runtime", "bundle.json"));
+      expect(capture.instructionsPath).toBe(path.join(workspace, ".paperclip", "runtime", "instructions.md"));
+      expect(capture.instructionsMarkdown).toContain("# Paperclip cursor runtime projection");
+      expect(capture.instructionsMarkdown).toContain("Cursor runtime materialization");
       expect(capture.bundleJson?.runtime).toBe("cursor");
       expect(capture.verificationJson?.requiresArtifacts).toBe(true);
       expect(capture.prompt).toContain("Paperclip runtime note:");

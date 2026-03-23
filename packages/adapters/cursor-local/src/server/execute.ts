@@ -81,13 +81,18 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
     .filter((key) => key.startsWith("PAPERCLIP_"))
     .sort();
   if (paperclipKeys.length === 0) return "";
-  return [
+  const runtimeRoot = env.PAPERCLIP_RUNTIME_ROOT?.trim() ?? "";
+  const instructionsPath = env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH?.trim() ?? "";
+  const lines = [
     "Paperclip runtime note:",
     `The following PAPERCLIP_* environment variables are available in this run: ${paperclipKeys.join(", ")}`,
     "Do not assume these variables are missing without checking your shell environment.",
-    "",
-    "",
-  ].join("\n");
+  ];
+  if (runtimeRoot && instructionsPath) {
+    lines.push(`Paperclip also materialized runtime files in ${runtimeRoot}. Start by reading ${instructionsPath}.`);
+  }
+  lines.push("", "");
+  return lines.join("\n");
 }
 
 function cursorSkillsHome(): string {
@@ -201,6 +206,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (runtimeBundleMaterialization) {
     env.PAPERCLIP_RUNTIME_ROOT = runtimeBundleMaterialization.root;
     env.PAPERCLIP_RUNTIME_BUNDLE_PATH = runtimeBundleMaterialization.bundlePath;
+    env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH = runtimeBundleMaterialization.instructionsPath;
   }
   const wakeTaskId =
     (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
