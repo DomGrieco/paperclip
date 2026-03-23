@@ -90,9 +90,15 @@ function makeBundle(): RuntimeBundle {
 describe("prepareHermesAdapterConfigForExecution", () => {
   it("injects Paperclip auth/runtime env and materializes runtime files for Hermes", async () => {
     const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(path.join(sharedSource, "auth.json"), '{"provider":"openai-codex"}\n', "utf8");
     const nextConfig = await prepareHermesAdapterConfigForExecution({
-      config: { model: "anthropic/claude-sonnet-4" },
+      config: {
+        model: "anthropic/claude-sonnet-4",
+        env: { PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource },
+      },
       cwd,
+      agentHome: path.join(cwd, "agent-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-123",
     });

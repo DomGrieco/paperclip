@@ -47,6 +47,7 @@ services:
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
     volumes:
       - paperclip-data:/paperclip
+      - ${HOME}/.hermes:/paperclip/shared/hermes-home-source:ro
     depends_on:
       db:
         condition: service_healthy

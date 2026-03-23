@@ -1,7 +1,11 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import type { RuntimeBundle } from "@paperclipai/shared";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
+const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
+const SHARED_HERMES_AUTH_FILES = ["auth.json", ".env", "config.yaml"] as const;
 
 const DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE = `You are "{{agentName}}", a Hermes worker in a Paperclip-managed company.
 
@@ -63,9 +67,34 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
 ${existingPromptTemplate}`;
 }
 
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function syncSharedHermesAuthProfile(input: {
+  workerHome: string;
+  sharedSource: string;
+}): Promise<void> {
+  await fs.mkdir(input.workerHome, { recursive: true });
+  if (!(await pathExists(input.sharedSource))) return;
+  for (const relativeName of SHARED_HERMES_AUTH_FILES) {
+    const source = path.join(input.sharedSource, relativeName);
+    if (!(await pathExists(source))) continue;
+    const destination = path.join(input.workerHome, relativeName);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.copyFile(source, destination);
+  }
+}
+
 export async function prepareHermesAdapterConfigForExecution(input: {
   config: Record<string, unknown>;
   cwd: string;
+  agentHome?: string | null;
   runtimeBundle: RuntimeBundle | null;
   authToken?: string | null;
 }): Promise<Record<string, unknown>> {
@@ -81,6 +110,12 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   if (!readString(env.PAPERCLIP_API_KEY) && readString(input.authToken)) {
     env.PAPERCLIP_API_KEY = readString(input.authToken)!;
   }
+
+  const workerHome = readString(input.agentHome) ?? path.join(input.cwd, ".paperclip", "hermes-home");
+  const sharedSource =
+    readString(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
+  await syncSharedHermesAuthProfile({ workerHome, sharedSource });
+  env.HERMES_HOME = workerHome;
 
   if (input.runtimeBundle) {
     const materialized = await materializeRuntimeBundleWorkspace({

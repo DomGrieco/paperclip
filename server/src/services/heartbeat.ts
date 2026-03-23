@@ -1979,6 +1979,7 @@ export function heartbeatService(db: Db) {
         ? await prepareHermesAdapterConfigForExecution({
             config: resolvedConfig,
             cwd: executionWorkspace.cwd,
+            agentHome: readNonEmptyString(parseObject(context.paperclipWorkspace).agentHome) ?? null,
             runtimeBundle,
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
           })
