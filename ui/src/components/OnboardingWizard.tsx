@@ -67,7 +67,7 @@ type AdapterType =
   | "http"
   | "openclaw_gateway";
 
-const DEFAULT_HERMES_MODEL = "anthropic/claude-sonnet-4";
+const DEFAULT_HERMES_MODEL = "";
 
 const DEFAULT_TASK_DESCRIPTION = `Setup yourself as the CEO. Use the ceo persona found here: 
 

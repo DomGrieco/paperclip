@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { ServerAdapterModule } from "./types.js";
 import { getAdapterSessionManagement } from "@paperclipai/adapter-utils";
 import {
@@ -65,6 +67,71 @@ import {
 } from "hermes-paperclip-adapter";
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
+import { prepareHermesAdapterConfigForExecution } from "../services/hermes-runtime.js";
+
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await fs.access(candidate);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hermesTestEnvironmentWithResolvedConfig(ctx: {
+  companyId: string;
+  adapterType: string;
+  config: Record<string, unknown>;
+}) {
+  const cwd = path.join("/tmp", "paperclip-hermes-env-check", ctx.companyId);
+  await fs.mkdir(cwd, { recursive: true });
+  const resolvedConfig = await prepareHermesAdapterConfigForExecution({
+    config: ctx.config,
+    cwd,
+    runtimeBundle: null,
+    authToken: null,
+  });
+
+  const result = await hermesTestEnvironment({
+    ...ctx,
+    config: resolvedConfig,
+  });
+
+  const env =
+    typeof resolvedConfig.env === "object" &&
+    resolvedConfig.env !== null &&
+    !Array.isArray(resolvedConfig.env)
+      ? (resolvedConfig.env as Record<string, unknown>)
+      : {};
+  const hermesHome = typeof env.HERMES_HOME === "string" ? env.HERMES_HOME : null;
+  const hasSharedAuth = hermesHome
+    ? await pathExists(path.join(hermesHome, "auth.json"))
+    : false;
+
+  if (!hasSharedAuth) {
+    return result;
+  }
+
+  const checks = result.checks.map((check) =>
+    check.code === "hermes_no_api_keys"
+      ? {
+          ...check,
+          level: "info" as const,
+          message: "Hermes shared auth profile found in HERMES_HOME",
+          hint: "Paperclip copied Hermes auth/config into the worker-local HERMES_HOME for this run.",
+          code: "hermes_shared_auth_profile_found",
+        }
+      : check,
+  );
+
+  const hasErrors = checks.some((check) => check.level === "error");
+  const hasWarnings = checks.some((check) => check.level === "warn");
+  return {
+    ...result,
+    checks,
+    status: hasErrors ? ("fail" as const) : hasWarnings ? ("warn" as const) : ("pass" as const),
+  };
+}
 
 const claudeLocalAdapter: ServerAdapterModule = {
   type: "claude_local",
@@ -150,7 +217,7 @@ const piLocalAdapter: ServerAdapterModule = {
 const hermesLocalAdapter: ServerAdapterModule = {
   type: "hermes_local",
   execute: hermesExecute,
-  testEnvironment: hermesTestEnvironment,
+  testEnvironment: hermesTestEnvironmentWithResolvedConfig,
   sessionCodec: hermesSessionCodec,
   models: hermesModels,
   supportsLocalAgentJwt: true,
