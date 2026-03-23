@@ -7,6 +7,7 @@ const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const SHARED_HERMES_AUTH_FILES = ["auth.json", ".env", "config.yaml"] as const;
 const SHARED_CONTEXT_FILE = "shared-context.json";
+const PAPERCLIP_RUNTIME_ROOT = path.join(".paperclip", "runtime");
 const PAPERCLIP_API_HELPER_FILE = "paperclip-api";
 const DEFAULT_CODEX_MODEL = "gpt-5.3-codex";
 const DEFAULT_ANTHROPIC_MODEL = "anthropic/claude-sonnet-4";
@@ -305,6 +306,9 @@ export async function prepareHermesAdapterConfigForExecution(input: {
       nextConfig.model = defaultModel;
     }
   }
+
+  const helperRuntimeRoot = path.join(input.cwd, PAPERCLIP_RUNTIME_ROOT);
+  env.PAPERCLIP_API_HELPER_PATH = await materializePaperclipApiHelper(helperRuntimeRoot);
 
   if (input.runtimeBundle) {
     const materialized = await materializeRuntimeBundleWorkspace({

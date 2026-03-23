@@ -198,6 +198,9 @@ describe("prepareHermesAdapterConfigForExecution", () => {
 
     const env = nextConfig.env as Record<string, string>;
     expect(env.PAPERCLIP_API_KEY).toBe("preset-key");
+    expect(env.PAPERCLIP_API_HELPER_PATH).toContain(path.join(".paperclip", "runtime", "paperclip-api"));
+    const helper = await fs.readFile(env.PAPERCLIP_API_HELPER_PATH, "utf8");
+    expect(helper).toContain("urllib.request");
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
     expect(String(nextConfig.promptTemplate)).toContain("Custom instructions for {{agentName}}");
     expect(nextConfig.provider).toBe("openai-codex");
