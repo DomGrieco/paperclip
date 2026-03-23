@@ -29,7 +29,11 @@ COPY packages/adapters/pi-local/package.json packages/adapters/pi-local/
 RUN pnpm install --frozen-lockfile
 
 FROM base AS runtime-tools
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ripgrep ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
+  && python3 -m pip install --break-system-packages git+https://github.com/NousResearch/hermes-agent.git \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
 

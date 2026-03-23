@@ -284,6 +284,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     adapterType === "claude_local" ||
     adapterType === "codex_local" ||
     adapterType === "gemini_local" ||
+    adapterType === "hermes_local" ||
     adapterType === "opencode_local" ||
     adapterType === "cursor";
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
@@ -379,7 +380,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       : adapterType === "opencode_local"
         ? eff("adapterConfig", "variant", String(config.variant ?? ""))
       : eff("adapterConfig", "effort", String(config.effort ?? ""));
-  const showThinkingEffort = adapterType !== "gemini_local";
+  const showThinkingEffort = adapterType !== "gemini_local" && adapterType !== "hermes_local";
   const codexSearchEnabled = adapterType === "codex_local"
     ? (isCreate ? Boolean(val!.search) : eff("adapterConfig", "search", Boolean(config.search)))
     : false;
@@ -639,12 +640,24 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   value={
                     isCreate
                       ? val!.command
-                      : eff("adapterConfig", "command", String(config.command ?? ""))
+                      : eff(
+                          "adapterConfig",
+                          adapterType === "hermes_local" ? "hermesCommand" : "command",
+                          String(
+                            adapterType === "hermes_local"
+                              ? (config.hermesCommand ?? "")
+                              : (config.command ?? ""),
+                          ),
+                        )
                   }
                   onCommit={(v) =>
                     isCreate
                       ? set!({ command: v })
-                      : mark("adapterConfig", "command", v || undefined)
+                      : mark(
+                          "adapterConfig",
+                          adapterType === "hermes_local" ? "hermesCommand" : "command",
+                          v || undefined,
+                        )
                   }
                   immediate
                   className={inputClass}
@@ -653,6 +666,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       ? "codex"
                       : adapterType === "gemini_local"
                         ? "gemini"
+                      : adapterType === "hermes_local"
+                        ? "hermes"
                       : adapterType === "cursor"
                         ? "agent"
                         : adapterType === "opencode_local"
