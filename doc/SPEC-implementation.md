@@ -16,6 +16,7 @@ The next major architecture program is captured separately in:
 - `doc/spec/autonomous-enterprise-roadmap.md`
 - `doc/spec/feature-1-hierarchical-orchestration.md`
 - `doc/spec/agent-runtime-surface.md`
+- `doc/spec/hermes-fleet-control-plane.md`
 
 Those docs define the post-V1 implementation direction.
 This document remains the baseline contract for the currently shipped/control-plane V1 surface.

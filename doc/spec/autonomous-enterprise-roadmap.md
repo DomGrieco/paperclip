@@ -12,6 +12,7 @@ This document maps the approved program into a dependency-driven build sequence.
 - `doc/SPEC.md` remains the umbrella architecture and long-horizon vision.
 - `doc/SPEC-implementation.md` remains the current V1 baseline contract.
 - This document defines the next major implementation program, the reference systems that inform it, and the order the work should land.
+- `doc/spec/hermes-fleet-control-plane.md` captures the specialized runtime/fleet architecture when Hermes is used as the primary worker runtime under Paperclip.
 
 ## 2. Primary Program Target
 
@@ -53,6 +54,7 @@ These constraints apply across the full program:
 - TDD is the default execution policy for software work
 - config is managed in Paperclip and materialized into runtime files for coding agents
 - runtime projections target `codex`, `cursor`, `opencode`, and later `pi`
+- Hermes is the primary long-lived specialist worker target for the local-first fleet architecture; see `doc/spec/hermes-fleet-control-plane.md`
 - `claude` is legacy/non-priority and should not shape the architecture
 
 ## 5. Program Sequence
@@ -93,6 +95,8 @@ After runs and runners exist, the system needs a stable way to prepare worker co
 - MCP/tool bindings
 - runtime bundle generation
 - tool-specific projections
+
+This phase must explicitly cover the Hermes runtime projection and the env/recall/workspace contract required by the Hermes fleet architecture.
 
 See: `doc/spec/agent-runtime-surface.md`
 
