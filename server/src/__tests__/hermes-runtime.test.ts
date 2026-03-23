@@ -112,6 +112,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_RUNTIME_ROOT).toContain(path.join(".paperclip", "runtime"));
     expect(env.PAPERCLIP_RUNTIME_BUNDLE_PATH).toContain(path.join(".paperclip", "runtime", "bundle.json"));
     expect(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH).toContain(path.join(".paperclip", "runtime", "instructions.md"));
+    expect(env.PAPERCLIP_API_HELPER_PATH).toContain(path.join(".paperclip", "runtime", "paperclip-api"));
     expect(env.PAPERCLIP_ISSUE_ID).toBe("issue-1");
     expect(env.PAPERCLIP_PROJECT_ID).toBe("project-1");
     expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
@@ -123,6 +124,10 @@ describe("prepareHermesAdapterConfigForExecution", () => {
 
     const instructions = await fs.readFile(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH, "utf8");
     expect(instructions).toContain("Paperclip hermes runtime projection");
+
+    const helper = await fs.readFile(env.PAPERCLIP_API_HELPER_PATH, "utf8");
+    expect(helper).toContain("urllib.request");
+    expect(helper).toContain("PAPERCLIP_API_URL");
 
     const sharedContext = JSON.parse(await fs.readFile(env.PAPERCLIP_SHARED_CONTEXT_PATH, "utf8")) as {
       companyId: string;
@@ -139,7 +144,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
 
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
     expect(String(nextConfig.promptTemplate)).toContain("shared context packet");
-    expect(String(nextConfig.promptTemplate)).toContain("Authorization: Bearer $PAPER...Y");
+    expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_HELPER_PATH");
+    expect(String(nextConfig.promptTemplate)).toContain("Treat raw `curl` as last-resort debugging only");
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.3-codex");
   });
