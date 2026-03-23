@@ -51,6 +51,19 @@ export function resolveObservedRunnerSnapshot(input: {
   runtimeServices?: RuntimeServiceRef[] | null;
 }): RuntimeBundleRunner {
   const services = input.runtimeServices ?? [];
+  const hermesContainers = services.filter((service) => service.provider === "hermes_container");
+  if (hermesContainers.length > 0) {
+    return {
+      target: "hermes_container",
+      provider: "hermes_container",
+      workspaceStrategyType: input.planned.workspaceStrategyType,
+      executionMode: input.planned.executionMode,
+      browserCapable: hermesContainers.some((service) => Boolean(service.url)),
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    };
+  }
+
   const adapterManaged = services.filter((service) => service.provider === "adapter_managed");
   if (adapterManaged.length === 0) return input.planned;
 

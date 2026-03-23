@@ -55,6 +55,7 @@ export interface AdapterRuntimeServiceReport {
   cwd?: string | null;
   port?: number | null;
   url?: string | null;
+  provider?: "adapter_managed" | "hermes_container";
   providerRef?: string | null;
   ownerAgentId?: string | null;
   stopPolicy?: Record<string, unknown> | null;

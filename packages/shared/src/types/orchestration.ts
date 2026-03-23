@@ -59,13 +59,13 @@ export interface RuntimeBundleMemoryPacket {
 }
 
 export interface RuntimeBundleRunner {
-  target: "local_host" | "adapter_managed" | "cloud_sandbox";
-  provider: "local_process" | "adapter_managed" | "cloud_sandbox";
+  target: "local_host" | "adapter_managed" | "cloud_sandbox" | "hermes_container";
+  provider: "local_process" | "adapter_managed" | "cloud_sandbox" | "hermes_container";
   workspaceStrategyType: string | null;
   executionMode: string | null;
   browserCapable: boolean;
   sandboxed: boolean;
-  isolationBoundary: "host_process" | "adapter_runtime" | "cloud_sandbox";
+  isolationBoundary: "host_process" | "adapter_runtime" | "container_process" | "cloud_sandbox";
 }
 
 export interface RuntimeBundleProjection {

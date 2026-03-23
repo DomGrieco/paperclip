@@ -81,4 +81,55 @@ describe("runner-plane", () => {
       isolationBoundary: "adapter_runtime",
     });
   });
+
+  it("prefers hermes container runtime services when present", () => {
+    const planned = resolvePlannedRunnerSnapshot({
+      defaultMode: "isolated_workspace",
+      workspaceStrategy: { type: "git_worktree" },
+    });
+
+    expect(
+      resolveObservedRunnerSnapshot({
+        planned,
+        runtimeServices: [
+          {
+            id: "svc-1",
+            companyId: "company-1",
+            projectId: null,
+            projectWorkspaceId: null,
+            executionWorkspaceId: null,
+            issueId: null,
+            serviceName: "hermes-worker",
+            status: "running",
+            lifecycle: "ephemeral",
+            scopeType: "run",
+            scopeId: "run-1",
+            reuseKey: null,
+            command: null,
+            cwd: null,
+            port: null,
+            url: "https://hermes.example.test",
+            provider: "hermes_container",
+            providerRef: "hermes-ctr-1",
+            ownerAgentId: null,
+            startedByRunId: "run-1",
+            lastUsedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            stoppedAt: null,
+            stopPolicy: null,
+            healthStatus: "healthy",
+            reused: false,
+          },
+        ],
+      }),
+    ).toEqual({
+      target: "hermes_container",
+      provider: "hermes_container",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+  });
 });

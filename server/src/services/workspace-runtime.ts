@@ -59,7 +59,7 @@ export interface RuntimeServiceRef {
   cwd: string | null;
   port: number | null;
   url: string | null;
-  provider: "local_process" | "adapter_managed";
+  provider: "local_process" | "adapter_managed" | "hermes_container";
   providerRef: string | null;
   ownerAgentId: string | null;
   startedByRunId: string | null;
@@ -112,6 +112,7 @@ function stableRuntimeServiceId(input: {
   scopeId: string | null;
   serviceName: string;
   reportId: string | null;
+  provider: RuntimeServiceRef["provider"];
   providerRef: string | null;
   reuseKey: string | null;
 }) {
@@ -124,6 +125,7 @@ function stableRuntimeServiceId(input: {
         scopeType: input.scopeType,
         scopeId: input.scopeId,
         serviceName: input.serviceName,
+        provider: input.provider,
         providerRef: input.providerRef,
         reuseKey: input.reuseKey,
       }),
@@ -1036,6 +1038,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
     const serviceName = asString(report.serviceName, "").trim() || "service";
     const status = report.status ?? "running";
     const lifecycle = report.lifecycle ?? "ephemeral";
+    const provider = report.provider ?? "adapter_managed";
     const healthStatus =
       report.healthStatus ??
       (status === "running" ? "healthy" : status === "failed" ? "unhealthy" : "unknown");
@@ -1047,6 +1050,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
         scopeId,
         serviceName,
         reportId: report.id ?? null,
+        provider,
         providerRef: report.providerRef ?? null,
         reuseKey: report.reuseKey ?? null,
       }),
@@ -1065,7 +1069,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
       cwd: report.cwd ?? null,
       port: report.port ?? null,
       url: report.url ?? null,
-      provider: "adapter_managed",
+      provider,
       providerRef: report.providerRef ?? null,
       ownerAgentId: report.ownerAgentId ?? input.agent.id,
       startedByRunId: input.runId,

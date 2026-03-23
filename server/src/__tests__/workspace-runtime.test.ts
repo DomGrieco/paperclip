@@ -946,6 +946,37 @@ describe("normalizeAdapterManagedRuntimeServices", () => {
     expect(first[0]?.id).toBe(second[0]?.id);
   });
 
+  it("preserves hermes container provider metadata on runtime services", () => {
+    const workspace = buildWorkspace("/tmp/project");
+    const refs = normalizeAdapterManagedRuntimeServices({
+      adapterType: "hermes_local",
+      runId: "run-2",
+      agent: {
+        id: "agent-2",
+        name: "Hermes Worker",
+        companyId: "company-1",
+      },
+      issue: null,
+      workspace,
+      reports: [
+        {
+          serviceName: "hermes-worker",
+          provider: "hermes_container",
+          providerRef: "container-9",
+          scopeType: "run",
+        },
+      ],
+    });
+
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toMatchObject({
+      provider: "hermes_container",
+      providerRef: "container-9",
+      serviceName: "hermes-worker",
+      ownerAgentId: "agent-2",
+    });
+  });
+
   it("prefers execution workspace ids over cwd for execution-scoped adapter services", () => {
     const workspace = buildWorkspace("/tmp/project");
 
