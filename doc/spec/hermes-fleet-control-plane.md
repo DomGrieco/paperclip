@@ -3,7 +3,7 @@
 Status: Draft
 Date: 2026-03-22
 Audience: Product + Engineering
-Scope: Using Paperclip as the control plane for a fleet of specialized Hermes agents running in isolated workspaces/containers with scoped memory and controlled shared context
+Scope: Using Paperclip as the protected control plane for a fleet of specialized Hermes agents running in isolated workspaces/containers with company-scoped managed Hermes state and controlled shared context
 
 ## 1. Document Role
 
@@ -51,12 +51,14 @@ Hermes must remain the execution/runtime source of truth.
 The Hermes fleet architecture must support:
 
 1. One Paperclip deployment managing many specialized Hermes agents.
-2. Per-agent isolation of workspace, sessions, memory, skills, and credentials.
-3. Shared context through governed Paperclip surfaces, not by merging all Hermes homes into one brain.
-4. 24/7 autonomous operation on a long-lived Ubuntu server.
-5. Strong auditability of work, costs, artifacts, approvals, and cross-agent coordination.
-6. Browser/test-capable agent execution for software verification loops.
-7. Local-first developer ergonomics on macOS while production runs on Ubuntu/Docker.
+2. Company-scoped managed Hermes state for shared memory/skills/config where that improves long-lived organizational behavior.
+3. Per-run and per-workspace isolation for execution sandboxes, repos, artifacts, and temporary state.
+4. Shared context through governed Paperclip surfaces and a managed company Hermes home, not by letting workers mutate the Paperclip control-plane filesystem.
+5. 24/7 autonomous operation on a long-lived Ubuntu server.
+6. Strong auditability of work, costs, artifacts, approvals, and cross-agent coordination.
+7. Browser/test-capable agent execution for software verification loops.
+8. Local-first developer ergonomics on macOS while production runs on Ubuntu/Docker.
+9. Fresh deployment support without requiring a preexisting host `~/.hermes` on the runtime machine.
 
 ## 4. Deployment Topology
 
@@ -108,6 +110,23 @@ Default architectural decision:
 - do not use classic DinD as the default
 - prefer sibling containers launched by a dedicated runner service or Docker API integration
 
+## 4.4 Hermes setup and bootstrap model
+
+Paperclip must support Hermes bootstrap as a control-plane capability.
+A production deployment must not depend on a preexisting host `~/.hermes` on the machine running Paperclip.
+
+Supported bootstrap modes:
+
+1. Managed bootstrap (target default)
+- operator configures Hermes provider auth/config through Paperclip-managed secrets or setup flows
+- Paperclip materializes the company Hermes home from managed state
+- worker runs do not depend on host-local Hermes directories
+
+2. Import/bootstrap from an existing Hermes home (migration path)
+- an operator may import selected data from an existing `~/.hermes`
+- imported data becomes Paperclip-managed company state
+- the host path is a bootstrap source only, not a permanent runtime dependency
+
 ## 5. Runtime Planes
 
 ## 5.1 Control plane
@@ -146,11 +165,16 @@ Examples:
 
 Each worker gets:
 - its own repo/workspace mount
-- its own `HERMES_HOME`
-- its own session DB and local memory
-- its own skills directory
+- a company-scoped managed `HERMES_HOME` baseline projected by Paperclip
+- run/workspace-local scratch state for temporary execution data
 - its own toolset/profile
 - its own secrets scope
+
+The default long-term model is not one fully isolated Hermes home per agent.
+Instead:
+- one managed Hermes home per company provides shared durable memories, skills, and safe runtime defaults
+- individual runs still execute in isolated workspaces/containers with scoped writable areas
+- Paperclip governs which parts of worker state are durable company assets vs throwaway run-local state
 
 ## 6. Hermes Runtime Modes In Paperclip
 
@@ -209,24 +233,35 @@ For Hermes workers, the runtime bundle should define whether the run uses:
 
 ## 8.1 Principle
 
-Do not create one globally shared Hermes memory directory.
-Use layered memory.
+Use layered memory with a Paperclip-managed company Hermes home plus Paperclip-governed shared context.
+Do not let workers share or mutate the Paperclip control-plane filesystem directly.
 
 ## 8.2 Memory layers
 
-### Layer A: Hermes local memory
+### Layer A: Company Hermes durable state
 
-Private to one Hermes worker profile.
-Stored inside that worker's `HERMES_HOME`.
+Shared by Hermes workers within one Paperclip company.
+Stored inside a Paperclip-managed company-scoped `HERMES_HOME`.
 
 Allowed contents:
-- project conventions
-- repo-specific notes
-- tool quirks
-- local operating habits
-- project-specific reusable skills
+- company operating conventions
+- shared reusable skills
+- durable memories that should help many agents in the same company
+- safe runtime defaults and provider configuration
+- tool quirks and working norms that are valuable across the company
 
-### Layer B: Paperclip shared structured context
+### Layer B: Run/workspace-local scratch state
+
+Private to one execution workspace or run.
+Stored outside the protected company durable area.
+
+Allowed contents:
+- temporary conversation/session continuity
+- run-local artifacts
+- repo-specific scratch notes
+- checkpoints that should not automatically become company-wide durable memory
+
+### Layer C: Paperclip shared structured context
 
 Company/project/issue scoped context owned by Paperclip.
 
@@ -239,9 +274,9 @@ Allowed contents:
 - bounded recall packets
 - shared findings with provenance
 
-### Layer C: Published knowledge
+### Layer D: Published knowledge
 
-When a Hermes agent learns something useful for others, it should publish a structured item back to Paperclip instead of assuming direct access to another worker's local memory.
+When a Hermes agent learns something useful for others, it should publish a structured item back to Paperclip instead of relying on undocumented side effects inside the company Hermes home.
 
 Published knowledge item fields should include at least:
 - source agent id
@@ -305,7 +340,7 @@ Each Hermes worker should receive only the toolset needed for its role.
 
 Examples:
 - planning worker: search/read/web/tools, limited write ability
-- engineering worker: terminal/file/git/browser if required
+- engineering worker: terminal/file/git/browser if required inside an assigned project workspace
 - verifier: browser/terminal/test/reporting tools
 - research worker: web/search/extract/note publishing tools
 
@@ -315,6 +350,12 @@ Permissions must be scoped by:
 - project
 - workspace
 - approval/budget state
+
+Hard boundary:
+- workers must not directly edit or patch the Paperclip control-plane repo/files inside the Paperclip server container
+- workers must not rely on writable mounts into Paperclip application code or control-plane state directories
+- control-plane mutations must go through explicit Paperclip APIs, helper CLIs, or runner-governed workflows
+- writable filesystem access should be limited to assigned project workspaces, artifact directories, and approved worker-state locations
 
 Human approval gates remain required for high-risk actions such as:
 - destructive repository operations
@@ -446,8 +487,10 @@ A Hermes fleet slice is not done until it passes:
 
 1. Proceed with Paperclip as the control plane and Hermes as the worker runtime.
 2. Keep one Hermes code fork, not one fork per project.
-3. Keep agent-local Hermes homes isolated.
-4. Use Paperclip-governed structured shared context instead of a pooled memory brain.
-5. Support Dockerized Paperclip plus isolated worker containers through a runner boundary, not default DinD.
-6. Evolve `hermes_local` into a broader Hermes runtime family with `hermes_container` as the production target.
-7. Treat browser dogfooding and end-to-end runtime validation as required for every control-plane slice touching execution.
+3. Use a Paperclip-managed company-scoped Hermes home as the default durable Hermes state boundary.
+4. Keep execution workspaces, repos, artifacts, and temporary run state isolated per run/workspace even when Hermes durable state is shared per company.
+5. Use Paperclip-governed structured shared context and publication flows instead of relying on ad hoc direct filesystem access between workers.
+6. Protect the Paperclip control-plane filesystem; workers must interact with it through API/helper/CLI surfaces rather than direct file edits.
+7. Support Dockerized Paperclip plus isolated worker containers through a runner boundary, not default DinD.
+8. Evolve `hermes_local` into a broader Hermes runtime family with `hermes_container` as the production target.
+9. Treat browser dogfooding and end-to-end runtime validation as required for every control-plane slice touching execution.
