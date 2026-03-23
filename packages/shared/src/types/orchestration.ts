@@ -58,6 +58,32 @@ export interface RuntimeBundleMemoryPacket {
   snippets: RuntimeBundleMemorySnippet[];
 }
 
+export interface PaperclipSharedContextScope {
+  companyId: string;
+  projectId: string | null;
+  issueId: string | null;
+  runId: string | null;
+  agentId: string;
+}
+
+export interface PaperclipSharedContextProvenance {
+  source: "runtime_bundle";
+  workspaceCwd: string;
+  runtimeBundleRoot: string | null;
+  runtimeInstructionsPath: string | null;
+  sharedContextPath: string | null;
+}
+
+export interface PaperclipSharedContextPacket {
+  version: "v1";
+  scope: PaperclipSharedContextScope;
+  policy: RuntimeBundlePolicy;
+  runner: RuntimeBundleRunner;
+  verification: RuntimeBundleVerification;
+  memory: RuntimeBundleMemoryPacket;
+  provenance: PaperclipSharedContextProvenance;
+}
+
 export interface RuntimeBundleRunner {
   target: "local_host" | "adapter_managed" | "cloud_sandbox" | "hermes_container";
   provider: "local_process" | "adapter_managed" | "cloud_sandbox" | "hermes_container";

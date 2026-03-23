@@ -129,6 +129,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_ISSUE_ID).toBe("issue-1");
     expect(env.PAPERCLIP_PROJECT_ID).toBe("project-1");
     expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
+    expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"version\":\"v1\"");
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
     expect(env.HERMES_HOME).toContain(path.join("agent-home"));
 
@@ -143,12 +144,24 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(helper).toContain("PAPERCLIP_API_URL");
 
     const sharedContext = JSON.parse(await fs.readFile(env.PAPERCLIP_SHARED_CONTEXT_PATH, "utf8")) as {
-      companyId: string;
-      issueId: string | null;
+      version: string;
+      scope: {
+        companyId: string;
+        issueId: string | null;
+        runId: string | null;
+      };
+      provenance: {
+        source: string;
+        workspaceCwd: string;
+      };
       memory: RuntimeBundle["memory"];
     };
-    expect(sharedContext.companyId).toBe("company-1");
-    expect(sharedContext.issueId).toBe("issue-1");
+    expect(sharedContext.version).toBe("v1");
+    expect(sharedContext.scope.companyId).toBe("company-1");
+    expect(sharedContext.scope.issueId).toBe("issue-1");
+    expect(sharedContext.scope.runId).toBe("run-1");
+    expect(sharedContext.provenance.source).toBe("runtime_bundle");
+    expect(sharedContext.provenance.workspaceCwd).toBe(cwd);
     expect(sharedContext.memory.snippets).toHaveLength(1);
 
     const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");

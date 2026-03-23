@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import type { RuntimeBundle } from "@paperclipai/shared";
+import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
@@ -324,18 +325,14 @@ export async function prepareHermesAdapterConfigForExecution(input: {
       env.PAPERCLIP_MEMORY_RECALL_JSON = JSON.stringify(input.runtimeBundle.memory);
       env.PAPERCLIP_API_HELPER_PATH = await materializePaperclipApiHelper(materialized.root);
 
-      const sharedContext = {
-        companyId: input.runtimeBundle.company.id,
-        projectId: input.runtimeBundle.project?.id ?? null,
-        issueId: input.runtimeBundle.issue?.id ?? null,
-        runId: input.runtimeBundle.run?.id ?? null,
-        agentId: input.runtimeBundle.agent.id,
-        policy: input.runtimeBundle.policy,
-        runner: input.runtimeBundle.runner,
-        verification: input.runtimeBundle.verification,
-        memory: input.runtimeBundle.memory,
-      };
       const sharedContextPath = path.join(path.dirname(materialized.root), "context", SHARED_CONTEXT_FILE);
+      const sharedContext = buildPaperclipSharedContextPacket({
+        runtimeBundle: input.runtimeBundle,
+        workspaceCwd: input.cwd,
+        runtimeBundleRoot: materialized.root,
+        runtimeInstructionsPath: materialized.instructionsPath,
+        sharedContextPath,
+      });
       await fs.mkdir(path.dirname(sharedContextPath), { recursive: true });
       await fs.writeFile(sharedContextPath, `${JSON.stringify(sharedContext, null, 2)}\n`, "utf8");
       env.PAPERCLIP_SHARED_CONTEXT_PATH = sharedContextPath;

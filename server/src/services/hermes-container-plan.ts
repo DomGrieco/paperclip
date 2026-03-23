@@ -7,11 +7,32 @@ const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source"
 const CONTAINER_WORKSPACE_ROOT = "/workspace";
 const CONTAINER_AGENT_HOME_ROOT = "/home/hermes/.hermes";
 const CONTAINER_RUNTIME_ROOT = "/paperclip/runtime";
-const CONTAINER_SHARED_AUTH_ROOT = "/paperclip/shared/hermes-auth-source";
-const CONTAINER_SHARED_CONTEXT_PATH = "/paperclip/context/shared-context.json";
+const CONTAINER_SHARED_AUTH_ROOT = "/paperclip/shared/hermes-home-source";
+const CONTAINER_SHARED_CONTEXT_PATH = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "context", "shared-context.json");
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function toContainerPath(hostPath: string, hostRoot: string, containerRoot: string): string {
+  if (hostPath === hostRoot) return containerRoot;
+  const relative = path.relative(hostRoot, hostPath);
+  if (relative === "" || relative === ".") return containerRoot;
+  const normalizedRelative = relative.split(path.sep).join(path.posix.sep);
+  return path.posix.join(containerRoot, normalizedRelative);
+}
+
+function normalizeHostAwareEnvPath(
+  value: string | null,
+  hostRoot: string | null,
+  containerRoot: string,
+): string | null {
+  if (!value) return null;
+  if (!hostRoot) return value;
+  if (value === hostRoot || value.startsWith(`${hostRoot}${path.sep}`)) {
+    return toContainerPath(value, hostRoot, containerRoot);
+  }
+  return value;
 }
 
 function toHermesContainerRunner(baseRunner: RuntimeBundleRunner | null | undefined): RuntimeBundleRunner {
@@ -48,12 +69,12 @@ export function buildHermesContainerLaunchPlan(input: {
   runtimeBundle: RuntimeBundle | null;
 }): HermesContainerLaunchPlan {
   const envRecord = parseObject(input.executionConfig.env);
-  const workspacePath = input.executionWorkspaceCwd;
-  const agentHomePath = readString(envRecord.HERMES_HOME) ?? path.join(workspacePath, ".paperclip", "hermes-home");
-  const sharedAuthSourcePath =
+  const workspaceHostPath = input.executionWorkspaceCwd;
+  const agentHomeHostPath = readString(envRecord.HERMES_HOME) ?? path.join(workspaceHostPath, ".paperclip", "hermes-home");
+  const sharedAuthSourceHostPath =
     readString(envRecord.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
-  const runtimeBundleRoot = readString(envRecord.PAPERCLIP_RUNTIME_ROOT);
-  const sharedContextPath = readString(envRecord.PAPERCLIP_SHARED_CONTEXT_PATH);
+  const runtimeBundleHostRoot = readString(envRecord.PAPERCLIP_RUNTIME_ROOT);
+  const sharedContextHostPath = readString(envRecord.PAPERCLIP_SHARED_CONTEXT_PATH);
   const image =
     readString(envRecord.PAPERCLIP_HERMES_CONTAINER_IMAGE) ??
     readString(input.executionConfig.containerImage) ??
@@ -65,22 +86,64 @@ export function buildHermesContainerLaunchPlan(input: {
       : []) as string[]),
   ];
 
+  const runtimeBundlePath = runtimeBundleHostRoot
+    ? normalizeHostAwareEnvPath(readString(envRecord.PAPERCLIP_RUNTIME_BUNDLE_PATH), runtimeBundleHostRoot, CONTAINER_RUNTIME_ROOT)
+    : null;
+  const runtimeInstructionsPath = runtimeBundleHostRoot
+    ? normalizeHostAwareEnvPath(
+        readString(envRecord.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH),
+        runtimeBundleHostRoot,
+        CONTAINER_RUNTIME_ROOT,
+      )
+    : null;
+  const runtimeApiHelperPath = runtimeBundleHostRoot
+    ? normalizeHostAwareEnvPath(readString(envRecord.PAPERCLIP_API_HELPER_PATH), runtimeBundleHostRoot, CONTAINER_RUNTIME_ROOT)
+    : null;
+  const sharedContextContainerPath =
+    sharedContextHostPath && sharedContextHostPath.startsWith(`${workspaceHostPath}${path.sep}`)
+      ? toContainerPath(sharedContextHostPath, workspaceHostPath, CONTAINER_WORKSPACE_ROOT)
+      : CONTAINER_SHARED_CONTEXT_PATH;
+
   const env: HermesContainerEnvPlan[] = [];
   for (const [name, value] of Object.entries(envRecord)) {
     if (typeof value !== "string" || value.length === 0) continue;
-    const source: HermesContainerEnvPlan["source"] =
-      name === "HERMES_HOME"
-        ? "worker_home"
-        : name.startsWith("PAPERCLIP_RUNTIME_") || name.startsWith("PAPERCLIP_SHARED_CONTEXT_")
-          ? "runtime_bundle"
-          : name === "PAPERCLIP_HERMES_SHARED_HOME_SOURCE"
-            ? "shared_auth"
-            : name.startsWith("PAPERCLIP_")
-              ? "paperclip_runtime"
-              : "resolved_config";
+
+    let nextValue = value;
+    let source: HermesContainerEnvPlan["source"] = "resolved_config";
+
+    if (name === "HERMES_HOME") {
+      nextValue = CONTAINER_AGENT_HOME_ROOT;
+      source = "worker_home";
+    } else if (name === "PAPERCLIP_HERMES_SHARED_HOME_SOURCE") {
+      nextValue = CONTAINER_SHARED_AUTH_ROOT;
+      source = "shared_auth";
+    } else if (name === "PAPERCLIP_RUNTIME_ROOT") {
+      nextValue = CONTAINER_RUNTIME_ROOT;
+      source = "runtime_bundle";
+    } else if (name === "PAPERCLIP_RUNTIME_BUNDLE_PATH") {
+      nextValue = runtimeBundlePath ?? value;
+      source = "runtime_bundle";
+    } else if (name === "PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH") {
+      nextValue = runtimeInstructionsPath ?? value;
+      source = "runtime_bundle";
+    } else if (name === "PAPERCLIP_API_HELPER_PATH") {
+      nextValue = runtimeApiHelperPath ?? value;
+      source = "runtime_bundle";
+    } else if (name === "PAPERCLIP_SHARED_CONTEXT_PATH") {
+      nextValue = sharedContextContainerPath;
+      source = "runtime_bundle";
+    } else if (name === "TERMINAL_CWD") {
+      nextValue = CONTAINER_WORKSPACE_ROOT;
+      source = "paperclip_runtime";
+    } else if (name.startsWith("PAPERCLIP_RUNTIME_") || name.startsWith("PAPERCLIP_SHARED_CONTEXT_")) {
+      source = "runtime_bundle";
+    } else if (name.startsWith("PAPERCLIP_")) {
+      source = "paperclip_runtime";
+    }
+
     env.push({
       name,
-      value,
+      value: nextValue,
       secret: isSecretEnvName(name),
       source,
     });
@@ -89,34 +152,34 @@ export function buildHermesContainerLaunchPlan(input: {
   const mounts: HermesContainerLaunchPlan["mounts"] = [
     {
       kind: "workspace",
-      hostPath: workspacePath,
+      hostPath: workspaceHostPath,
       containerPath: CONTAINER_WORKSPACE_ROOT,
       readOnly: false,
       purpose: "Primary execution workspace mounted read-write for Hermes task execution.",
     },
     {
       kind: "agent_home",
-      hostPath: agentHomePath,
+      hostPath: agentHomeHostPath,
       containerPath: CONTAINER_AGENT_HOME_ROOT,
       readOnly: false,
       purpose: "Worker-local Hermes home for sessions, config materialization, and isolated runtime state.",
     },
   ];
 
-  if (runtimeBundleRoot) {
+  if (runtimeBundleHostRoot) {
     mounts.push({
       kind: "runtime_bundle",
-      hostPath: runtimeBundleRoot,
+      hostPath: runtimeBundleHostRoot,
       containerPath: CONTAINER_RUNTIME_ROOT,
       readOnly: true,
       purpose: "Paperclip runtime bundle projection and instructions for the current run.",
     });
   }
 
-  if (sharedAuthSourcePath) {
+  if (sharedAuthSourceHostPath) {
     mounts.push({
       kind: "shared_auth",
-      hostPath: sharedAuthSourcePath,
+      hostPath: sharedAuthSourceHostPath,
       containerPath: CONTAINER_SHARED_AUTH_ROOT,
       readOnly: true,
       purpose: "Read-only shared Hermes auth source copied into the worker-local HERMES_HOME before execution.",
@@ -126,7 +189,7 @@ export function buildHermesContainerLaunchPlan(input: {
   if (!env.some((entry) => entry.name === "HERMES_HOME")) {
     env.push({
       name: "HERMES_HOME",
-      value: agentHomePath,
+      value: CONTAINER_AGENT_HOME_ROOT,
       secret: false,
       source: "worker_home",
     });
@@ -137,12 +200,12 @@ export function buildHermesContainerLaunchPlan(input: {
     runner: toHermesContainerRunner(input.runtimeBundle?.runner),
     image,
     command,
-    workingDir: workspacePath,
-    workspacePath,
-    agentHomePath,
-    sharedAuthSourcePath,
-    runtimeBundleRoot,
-    sharedContextPath: sharedContextPath ?? (runtimeBundleRoot ? CONTAINER_SHARED_CONTEXT_PATH : null),
+    workingDir: CONTAINER_WORKSPACE_ROOT,
+    workspacePath: CONTAINER_WORKSPACE_ROOT,
+    agentHomePath: CONTAINER_AGENT_HOME_ROOT,
+    sharedAuthSourcePath: sharedAuthSourceHostPath ? CONTAINER_SHARED_AUTH_ROOT : null,
+    runtimeBundleRoot: runtimeBundleHostRoot ? CONTAINER_RUNTIME_ROOT : null,
+    sharedContextPath: runtimeBundleHostRoot ? sharedContextContainerPath : null,
     provider: readString(input.executionConfig.provider),
     model: readString(input.executionConfig.model),
     mounts,

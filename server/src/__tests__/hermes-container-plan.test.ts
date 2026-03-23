@@ -89,6 +89,8 @@ describe("buildHermesContainerLaunchPlan", () => {
           HERMES_HOME: "/tmp/paperclip/workspaces/dmg-1/.paperclip/hermes-home",
           PAPERCLIP_RUNTIME_ROOT: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime",
           PAPERCLIP_RUNTIME_BUNDLE_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/bundle.json",
+          PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/instructions.md",
+          PAPERCLIP_API_HELPER_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/paperclip-api",
           PAPERCLIP_SHARED_CONTEXT_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/context/shared-context.json",
           PAPERCLIP_HERMES_SHARED_HOME_SOURCE: "/paperclip/shared/hermes-home-source",
           PAPERCLIP_API_KEY: "secret-token",
@@ -107,6 +109,12 @@ describe("buildHermesContainerLaunchPlan", () => {
     });
     expect(plan.image).toBe("paperclip/hermes-worker:dev");
     expect(plan.command).toEqual(["hermes"]);
+    expect(plan.workingDir).toBe("/workspace");
+    expect(plan.workspacePath).toBe("/workspace");
+    expect(plan.agentHomePath).toBe("/home/hermes/.hermes");
+    expect(plan.sharedAuthSourcePath).toBe("/paperclip/shared/hermes-home-source");
+    expect(plan.runtimeBundleRoot).toBe("/paperclip/runtime");
+    expect(plan.sharedContextPath).toBe("/workspace/.paperclip/context/shared-context.json");
     expect(plan.provider).toBe("openai-codex");
     expect(plan.model).toBe("gpt-5.3-codex");
     expect(plan.mounts).toEqual(
@@ -129,7 +137,7 @@ describe("buildHermesContainerLaunchPlan", () => {
         }),
         expect.objectContaining({
           kind: "shared_auth",
-          containerPath: "/paperclip/shared/hermes-auth-source",
+          containerPath: "/paperclip/shared/hermes-home-source",
           readOnly: true,
         }),
       ]),
@@ -138,10 +146,32 @@ describe("buildHermesContainerLaunchPlan", () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: "HERMES_HOME",
+          value: "/home/hermes/.hermes",
           source: "worker_home",
         }),
         expect.objectContaining({
           name: "PAPERCLIP_RUNTIME_ROOT",
+          value: "/paperclip/runtime",
+          source: "runtime_bundle",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_RUNTIME_BUNDLE_PATH",
+          value: "/paperclip/runtime/bundle.json",
+          source: "runtime_bundle",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH",
+          value: "/paperclip/runtime/instructions.md",
+          source: "runtime_bundle",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_API_HELPER_PATH",
+          value: "/paperclip/runtime/paperclip-api",
+          source: "runtime_bundle",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_SHARED_CONTEXT_PATH",
+          value: "/workspace/.paperclip/context/shared-context.json",
           source: "runtime_bundle",
         }),
         expect.objectContaining({
