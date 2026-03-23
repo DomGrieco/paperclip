@@ -68,6 +68,7 @@ import {
 import { processAdapter } from "./process/index.js";
 import { httpAdapter } from "./http/index.js";
 import { prepareHermesAdapterConfigForExecution } from "../services/hermes-runtime.js";
+import { buildHermesContainerBridgeRuntimeServices } from "../services/hermes-container-bridge.js";
 import { listHermesModels } from "./hermes-models.js";
 
 async function pathExists(candidate: string): Promise<boolean> {
@@ -217,7 +218,15 @@ const piLocalAdapter: ServerAdapterModule = {
 
 const hermesLocalAdapter: ServerAdapterModule = {
   type: "hermes_local",
-  execute: hermesExecute,
+  execute: async (ctx) => {
+    const result = await hermesExecute(ctx);
+    const bridgeRuntimeServices = buildHermesContainerBridgeRuntimeServices(ctx);
+    if (bridgeRuntimeServices.length === 0) return result;
+    return {
+      ...result,
+      runtimeServices: [...(result.runtimeServices ?? []), ...bridgeRuntimeServices],
+    };
+  },
   testEnvironment: hermesTestEnvironmentWithResolvedConfig,
   sessionCodec: hermesSessionCodec,
   models: hermesModels,
