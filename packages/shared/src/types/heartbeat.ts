@@ -12,12 +12,14 @@ import type {
 import type {
   OrchestrationArtifactBundle,
   OrchestrationPolicySnapshot,
+  PaperclipSharedContextPacket,
   RuntimeBundle,
   RuntimeBundleRunner,
 } from "./orchestration.js";
 
 export interface HeartbeatContextSnapshot extends Record<string, unknown> {
   paperclipRuntimeBundle?: RuntimeBundle | null;
+  paperclipSharedContextPacket?: PaperclipSharedContextPacket | null;
 }
 
 export interface HeartbeatRun {

@@ -29,6 +29,7 @@ import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService } from "./secrets.js";
 import { resolveCompanyHermesHomeDir, resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
+import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 import {
   buildWorkspaceReadyComment,
   cleanupExecutionWorkspaceArtifacts,
@@ -93,6 +94,7 @@ export function attachRuntimeBundleToContext(
     delete contextSnapshot.paperclipRuntimeProjection;
     delete contextSnapshot.paperclipPolicy;
     delete contextSnapshot.paperclipMemoryRecall;
+    delete contextSnapshot.paperclipSharedContextPacket;
     return contextSnapshot;
   }
 
@@ -100,6 +102,31 @@ export function attachRuntimeBundleToContext(
   contextSnapshot.paperclipRuntimeProjection = runtimeBundle.projection;
   contextSnapshot.paperclipPolicy = runtimeBundle.policy;
   contextSnapshot.paperclipMemoryRecall = runtimeBundle.memory;
+  return contextSnapshot;
+}
+
+export function attachPaperclipSharedContextPacketToContext(
+  contextSnapshot: Record<string, unknown>,
+  input: {
+    runtimeBundle: RuntimeBundle | null;
+    workspaceCwd: string | null;
+    runtimeBundleRoot: string | null;
+    runtimeInstructionsPath: string | null;
+    sharedContextPath: string | null;
+  },
+) {
+  if (!input.runtimeBundle || !input.workspaceCwd) {
+    delete contextSnapshot.paperclipSharedContextPacket;
+    return contextSnapshot;
+  }
+
+  contextSnapshot.paperclipSharedContextPacket = buildPaperclipSharedContextPacket({
+    runtimeBundle: input.runtimeBundle,
+    workspaceCwd: input.workspaceCwd,
+    runtimeBundleRoot: input.runtimeBundleRoot,
+    runtimeInstructionsPath: input.runtimeInstructionsPath,
+    sharedContextPath: input.sharedContextPath,
+  });
   return contextSnapshot;
 }
 
@@ -2005,6 +2032,13 @@ export function heartbeatService(db: Db) {
     const executionConfigWithRuntimeLaunch = injectHermesContainerLauncherService({
       config: executionConfig,
       plan: hermesContainerPlan,
+    });
+    attachPaperclipSharedContextPacketToContext(context, {
+      runtimeBundle,
+      workspaceCwd: executionWorkspace.cwd,
+      runtimeBundleRoot: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_ROOT) ?? null,
+      runtimeInstructionsPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH) ?? null,
+      sharedContextPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_SHARED_CONTEXT_PATH) ?? null,
     });
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
