@@ -6,6 +6,7 @@ import type { RuntimeBundle } from "@paperclipai/shared";
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const SHARED_HERMES_AUTH_FILES = ["auth.json", ".env", "config.yaml"] as const;
+const SHARED_CONTEXT_FILE = "shared-context.json";
 const DEFAULT_CODEX_MODEL = "gpt-5.3-codex";
 const DEFAULT_ANTHROPIC_MODEL = "anthropic/claude-sonnet-4";
 
@@ -22,6 +23,7 @@ ${RUNTIME_NOTE_MARKER}
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
 - Include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
+- If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
 
 Your Paperclip identity:
   Agent ID: {{agentId}}
@@ -38,7 +40,7 @@ Title: {{taskTitle}}
 
 ## Workflow
 
-1. Read \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` and \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\` before working.
+1. Read \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\` before working.
 2. Use the runtime bundle plus the current task details as your source of truth.
 3. Complete the task using your tools.
 4. When done, update the issue status:
@@ -83,6 +85,7 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
 - Include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools.
+- If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
 
 ${existingPromptTemplate}`;
 }
@@ -177,6 +180,23 @@ export async function prepareHermesAdapterConfigForExecution(input: {
       env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH = materialized.instructionsPath;
       env.PAPERCLIP_RUNTIME_BUNDLE_JSON = JSON.stringify(input.runtimeBundle);
       env.PAPERCLIP_MEMORY_RECALL_JSON = JSON.stringify(input.runtimeBundle.memory);
+
+      const sharedContext = {
+        companyId: input.runtimeBundle.company.id,
+        projectId: input.runtimeBundle.project?.id ?? null,
+        issueId: input.runtimeBundle.issue?.id ?? null,
+        runId: input.runtimeBundle.run?.id ?? null,
+        agentId: input.runtimeBundle.agent.id,
+        policy: input.runtimeBundle.policy,
+        runner: input.runtimeBundle.runner,
+        verification: input.runtimeBundle.verification,
+        memory: input.runtimeBundle.memory,
+      };
+      const sharedContextPath = path.join(path.dirname(materialized.root), "context", SHARED_CONTEXT_FILE);
+      await fs.mkdir(path.dirname(sharedContextPath), { recursive: true });
+      await fs.writeFile(sharedContextPath, `${JSON.stringify(sharedContext, null, 2)}\n`, "utf8");
+      env.PAPERCLIP_SHARED_CONTEXT_PATH = sharedContextPath;
+      env.PAPERCLIP_SHARED_CONTEXT_JSON = JSON.stringify(sharedContext);
     }
     if (input.runtimeBundle.issue?.id && readString(input.runtimeBundle.issue.id)) {
       env.PAPERCLIP_ISSUE_ID = input.runtimeBundle.issue.id;

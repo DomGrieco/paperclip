@@ -114,6 +114,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH).toContain(path.join(".paperclip", "runtime", "instructions.md"));
     expect(env.PAPERCLIP_ISSUE_ID).toBe("issue-1");
     expect(env.PAPERCLIP_PROJECT_ID).toBe("project-1");
+    expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
+    expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
     expect(env.HERMES_HOME).toContain(path.join("agent-home"));
 
     const bundleJson = await fs.readFile(env.PAPERCLIP_RUNTIME_BUNDLE_PATH, "utf8");
@@ -122,10 +124,21 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     const instructions = await fs.readFile(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH, "utf8");
     expect(instructions).toContain("Paperclip hermes runtime projection");
 
+    const sharedContext = JSON.parse(await fs.readFile(env.PAPERCLIP_SHARED_CONTEXT_PATH, "utf8")) as {
+      companyId: string;
+      issueId: string | null;
+      memory: RuntimeBundle["memory"];
+    };
+    expect(sharedContext.companyId).toBe("company-1");
+    expect(sharedContext.issueId).toBe("issue-1");
+    expect(sharedContext.memory.snippets).toHaveLength(1);
+
     const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");
+
     expect(copiedAuth).toContain("openai-codex");
 
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
+    expect(String(nextConfig.promptTemplate)).toContain("shared context packet");
     expect(String(nextConfig.promptTemplate)).toContain("Authorization: Bearer $PAPER...Y");
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.3-codex");
