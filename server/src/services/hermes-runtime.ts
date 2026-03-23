@@ -190,6 +190,63 @@ async function readHermesAuthStore(sharedSource: string): Promise<HermesAuthStor
   }
 }
 
+function sanitizeSharedHermesEnvFile(content: string): string {
+  return content
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(?:export\s+)?TERMINAL_CWD\s*=/.test(line))
+    .join("\n")
+    .replace(/\n*$/, "\n");
+}
+
+function sanitizeSharedHermesConfigYaml(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const sanitized: string[] = [];
+  let inTerminalBlock = false;
+  let terminalIndent = -1;
+
+  for (const line of lines) {
+    const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+    const trimmed = line.trim();
+
+    if (inTerminalBlock && trimmed.length > 0 && indent <= terminalIndent) {
+      inTerminalBlock = false;
+      terminalIndent = -1;
+    }
+
+    if (!inTerminalBlock && /^terminal\s*:\s*$/.test(trimmed)) {
+      inTerminalBlock = true;
+      terminalIndent = indent;
+      sanitized.push(line);
+      continue;
+    }
+
+    if (inTerminalBlock && /^cwd\s*:/.test(trimmed)) continue;
+    if (inTerminalBlock && /^working_dir\s*:/.test(trimmed)) continue;
+
+    sanitized.push(line);
+  }
+
+  return sanitized.join("\n").replace(/\n*$/, "\n");
+}
+
+async function copySanitizedSharedHermesFile(input: {
+  source: string;
+  destination: string;
+  relativeName: (typeof SHARED_HERMES_AUTH_FILES)[number];
+}): Promise<void> {
+  if (input.relativeName === "auth.json") {
+    await fs.copyFile(input.source, input.destination);
+    return;
+  }
+
+  const raw = await fs.readFile(input.source, "utf8");
+  const sanitized =
+    input.relativeName === ".env"
+      ? sanitizeSharedHermesEnvFile(raw)
+      : sanitizeSharedHermesConfigYaml(raw);
+  await fs.writeFile(input.destination, sanitized, "utf8");
+}
+
 async function syncSharedHermesAuthProfile(input: {
   workerHome: string;
   sharedSource: string;
@@ -202,7 +259,7 @@ async function syncSharedHermesAuthProfile(input: {
     if (!(await pathExists(source))) continue;
     const destination = path.join(input.workerHome, relativeName);
     await fs.mkdir(path.dirname(destination), { recursive: true });
-    await fs.copyFile(source, destination);
+    await copySanitizedSharedHermesFile({ source, destination, relativeName });
   }
 }
 
@@ -232,6 +289,7 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   const authStore = await readHermesAuthStore(sharedSource);
   await syncSharedHermesAuthProfile({ workerHome, sharedSource });
   env.HERMES_HOME = workerHome;
+  env.TERMINAL_CWD = input.cwd;
 
   const currentProvider = readString(input.config.provider);
   const currentModel = readString(input.config.model);

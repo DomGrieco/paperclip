@@ -96,6 +96,19 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       JSON.stringify({ active_provider: "openai-codex" }) + "\n",
       "utf8",
     );
+    await fs.writeFile(path.join(sharedSource, ".env"), "OPENAI_API_KEY=test-key\nTERMINAL_CWD=/Users/eru\n", "utf8");
+    await fs.writeFile(
+      path.join(sharedSource, "config.yaml"),
+      [
+        "model: gpt-5.3-codex",
+        "terminal:",
+        "  cwd: /Users/eru",
+        "  working_dir: /Users/eru",
+        "  timeout: 300",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     const nextConfig = await prepareHermesAdapterConfigForExecution({
       config: {
         model: "anthropic/claude-sonnet-4",
@@ -139,8 +152,17 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(sharedContext.memory.snippets).toHaveLength(1);
 
     const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");
+    const copiedEnv = await fs.readFile(path.join(env.HERMES_HOME, ".env"), "utf8");
+    const copiedConfig = await fs.readFile(path.join(env.HERMES_HOME, "config.yaml"), "utf8");
 
     expect(copiedAuth).toContain("openai-codex");
+    expect(copiedEnv).toContain("OPENAI_API_KEY=test-key");
+    expect(copiedEnv).not.toContain("TERMINAL_CWD=/Users/eru");
+    expect(copiedConfig).toContain("terminal:");
+    expect(copiedConfig).toContain("timeout: 300");
+    expect(copiedConfig).not.toContain("cwd: /Users/eru");
+    expect(copiedConfig).not.toContain("working_dir: /Users/eru");
+    expect(env.TERMINAL_CWD).toBe(cwd);
 
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
     expect(String(nextConfig.promptTemplate)).toContain("shared context packet");
