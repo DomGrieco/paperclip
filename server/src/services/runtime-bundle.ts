@@ -29,6 +29,7 @@ export function resolveRuntimeBundleTarget(adapterType: string | null | undefine
   if (adapterType === "codex_local") return "codex";
   if (adapterType === "cursor") return "cursor";
   if (adapterType === "opencode_local") return "opencode";
+  if (adapterType === "hermes_local") return "hermes";
   return null;
 }
 

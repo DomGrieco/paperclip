@@ -43,6 +43,7 @@ import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
+import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import {
@@ -1973,6 +1974,15 @@ export function heartbeatService(db: Db) {
           })
         : null;
     attachRuntimeBundleToContext(context, runtimeBundle);
+    const executionConfig =
+      agent.adapterType === "hermes_local"
+        ? await prepareHermesAdapterConfigForExecution({
+            config: resolvedConfig,
+            cwd: executionWorkspace.cwd,
+            runtimeBundle,
+            authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
+          })
+        : resolvedConfig;
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       taskSessionForRun?.sessionDisplayId ??
@@ -2112,7 +2122,7 @@ export function heartbeatService(db: Db) {
         await onLog(logEntry.stream, logEntry.chunk);
       }
       const adapterEnv = Object.fromEntries(
-        Object.entries(parseObject(resolvedConfig.env)).filter(
+        Object.entries(parseObject(executionConfig.env)).filter(
           (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
         ),
       );
@@ -2127,7 +2137,7 @@ export function heartbeatService(db: Db) {
         issue: issueRef,
         workspace: executionWorkspace,
         executionWorkspaceId: persistedExecutionWorkspace?.id ?? issueRef?.executionWorkspaceId ?? null,
-        config: resolvedConfig,
+        config: executionConfig,
         adapterEnv,
         onLog,
       });
@@ -2194,7 +2204,7 @@ export function heartbeatService(db: Db) {
         runId: run.id,
         agent,
         runtime: runtimeForAdapter,
-        config: resolvedConfig,
+        config: executionConfig,
         context,
         onLog,
         onMeta: onAdapterMeta,

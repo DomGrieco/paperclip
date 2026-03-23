@@ -287,6 +287,7 @@ describe("resolveRuntimeBundleTargetForAgent", () => {
     expect(resolveRuntimeBundleTargetForAgent("codex_local")).toBe("codex");
     expect(resolveRuntimeBundleTargetForAgent("cursor")).toBe("cursor");
     expect(resolveRuntimeBundleTargetForAgent("opencode_local")).toBe("opencode");
+    expect(resolveRuntimeBundleTargetForAgent("hermes_local")).toBe("hermes");
   });
 
   it("returns null for adapters without feature1 runtime bundle projections", () => {

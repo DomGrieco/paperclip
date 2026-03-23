@@ -14,7 +14,7 @@ export interface OrchestrationPolicySnapshot {
   [key: string]: unknown;
 }
 
-export type RuntimeBundleTarget = "codex" | "cursor" | "opencode";
+export type RuntimeBundleTarget = "codex" | "cursor" | "opencode" | "hermes";
 export type RuntimeBundleTddMode = "required";
 
 export interface RuntimeBundlePolicy {
