@@ -2207,9 +2207,13 @@ export function heartbeatService(db: Db) {
           `[paperclip] Hermes effective config: provider=${String(executionConfig.provider ?? "") || "<unset>"} model=${String(executionConfig.model ?? "") || "<unset>"} HERMES_HOME=${String(parseObject(executionConfig.env).HERMES_HOME ?? "") || "<unset>"}\n`,
         );
       }
+      const agentForExecution =
+        agent.adapterType === "hermes_local"
+          ? { ...agent, adapterConfig: executionConfig }
+          : agent;
       const adapterResult = await adapter.execute({
         runId: run.id,
-        agent,
+        agent: agentForExecution,
         runtime: runtimeForAdapter,
         config: executionConfig,
         context,
