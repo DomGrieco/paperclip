@@ -225,4 +225,57 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.2-codex");
   });
+
+  it("embeds issue-backed task workflow details into the prompt template for custom prompts", async () => {
+    const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        promptTemplate: "Custom instructions for {{agentName}}",
+        env: {
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource,
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        issue: {
+          id: "issue-99",
+          identifier: "PAP-99",
+          title: "Fix planner prompt contract",
+          status: "in_progress",
+          priority: "high",
+        },
+        memory: {
+          snippets: [
+            {
+              scope: "issue",
+              source: "issue.description",
+              sourceId: "issue-99",
+              content: "Use the assigned issue workflow, not the generic todo wake.",
+              freshness: "static",
+              updatedAt: "2026-03-24T00:00:00.000Z",
+              rank: 1,
+            },
+          ],
+        },
+      }),
+      authToken: "jwt-token-789",
+    });
+
+    const promptTemplate = String(nextConfig.promptTemplate);
+    expect(promptTemplate).toContain("## Assigned Task");
+    expect(promptTemplate).toContain("Issue ID: {{taskId}}");
+    expect(promptTemplate).toContain("Title: {{taskTitle}}");
+    expect(promptTemplate).toContain("{{taskBody}}");
+    expect(promptTemplate).toContain("patch /api/issues/{{taskId}} --json '{\"status\":\"done\"}'");
+    expect(promptTemplate).toContain("{{#noTask}}");
+    expect(promptTemplate).toContain("Check your assigned todo issues");
+  });
 });

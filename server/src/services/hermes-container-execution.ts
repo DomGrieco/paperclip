@@ -84,14 +84,40 @@ function cfgStringArray(v: unknown): string[] | undefined {
   return Array.isArray(v) && v.every((i) => typeof i === "string") ? v : undefined;
 }
 
-function buildPrompt(ctx: AdapterExecutionContext, config: Record<string, unknown>): string {
+function cfgRecord(v: unknown): Record<string, unknown> | undefined {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+}
+
+function getIssueDescriptionFromRuntimeMemory(runtimeBundle: Record<string, unknown> | undefined): string {
+  const memory = cfgRecord(runtimeBundle?.memory);
+  const snippets = Array.isArray(memory?.snippets) ? memory.snippets : [];
+  for (const snippet of snippets) {
+    const record = cfgRecord(snippet);
+    if (cfgString(record?.source) === "issue.description") {
+      return cfgString(record?.content) || "";
+    }
+  }
+  return "";
+}
+
+export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string, unknown>): string {
   const template = cfgString(config.promptTemplate) || DEFAULT_PROMPT_TEMPLATE;
-  const taskId = cfgString(ctx.config?.taskId);
-  const taskTitle = cfgString(ctx.config?.taskTitle) || "";
-  const taskBody = cfgString(ctx.config?.taskBody) || "";
+  const runtimeBundle = cfgRecord(ctx.context?.paperclipRuntimeBundle);
+  const runtimeIssue = cfgRecord(runtimeBundle?.issue);
+  const runtimeProject = cfgRecord(runtimeBundle?.project);
+  const taskId =
+    cfgString(ctx.config?.taskId) ||
+    cfgString(ctx.context?.taskId) ||
+    cfgString(ctx.context?.issueId) ||
+    cfgString(runtimeIssue?.id);
+  const taskTitle = cfgString(ctx.config?.taskTitle) || cfgString(runtimeIssue?.title) || "";
+  const taskBody =
+    cfgString(ctx.config?.taskBody) ||
+    getIssueDescriptionFromRuntimeMemory(runtimeBundle) ||
+    "";
   const agentName = ctx.agent?.name || "Hermes Agent";
   const companyName = cfgString(ctx.config?.companyName) || "";
-  const projectName = cfgString(ctx.config?.projectName) || "";
+  const projectName = cfgString(ctx.config?.projectName) || cfgString(runtimeProject?.name) || "";
   let paperclipApiUrl = cfgString(config.paperclipApiUrl) || process.env.PAPERCLIP_API_URL || "http://127.0.0.1:3100/api";
   if (!paperclipApiUrl.endsWith("/api")) {
     paperclipApiUrl = paperclipApiUrl.replace(/\/+$/, "") + "/api";
