@@ -1,12 +1,18 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRuns, issues } from "@paperclipai/db";
+import {
+  swarmPlanSchema,
+  swarmSubtaskSchema,
+} from "@paperclipai/shared";
 import type {
   HeartbeatRunStatus,
   HeartbeatRunType,
   HeartbeatRun,
   IssueOrchestrationSummary,
   OrchestrationPolicySnapshot,
+  SwarmPlan,
+  SwarmSubtask,
   VerificationVerdict,
 } from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
@@ -23,6 +29,7 @@ type SpawnWorkerInput = {
   triggerDetail?: HeartbeatRun["triggerDetail"];
   contextSnapshot?: Record<string, unknown> | null;
   status?: HeartbeatRun["status"];
+  subtask?: SwarmSubtask | null;
 };
 
 type PlannerGraphMetadata = Pick<HeartbeatRun, "runType" | "rootRunId" | "parentRunId" | "graphDepth"> & {
@@ -50,6 +57,18 @@ function resolveMaxRepairAttempts(policy: OrchestrationPolicySnapshot | null | u
   const raw = Number(policy?.maxRepairAttempts ?? DEFAULT_MAX_REPAIR_ATTEMPTS);
   if (!Number.isFinite(raw)) return DEFAULT_MAX_REPAIR_ATTEMPTS;
   return Math.max(0, Math.trunc(raw));
+}
+
+function readSwarmPlan(value: Record<string, unknown> | null | undefined): SwarmPlan | null {
+  const candidate = value?.swarmPlan;
+  const parsed = swarmPlanSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+function readSwarmSubtask(value: Record<string, unknown> | null | undefined): SwarmSubtask | null {
+  const candidate = value?.swarmSubtask;
+  const parsed = swarmSubtaskSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
 }
 
 export function issueRunGraphService(db: Db) {
@@ -131,6 +150,31 @@ export function issueRunGraphService(db: Db) {
     return root;
   }
 
+  async function attachSwarmPlan(rootRunId: string, swarmPlan: SwarmPlan) {
+    const root = await getRun(rootRunId);
+    if (!root) throw notFound("Planner root not found");
+    if (root.runType !== "planner") throw conflict("Swarm plans can only attach to planner roots");
+
+    const normalizedPlan = swarmPlanSchema.parse({
+      ...swarmPlan,
+      plannerRunId: swarmPlan.plannerRunId ?? root.id,
+    });
+
+    const [updated] = await db
+      .update(heartbeatRuns)
+      .set({
+        contextSnapshot: {
+          ...(root.contextSnapshot ?? {}),
+          swarmPlan: normalizedPlan,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(heartbeatRuns.id, root.id))
+      .returning();
+
+    return updated;
+  }
+
   async function resolvePlannerGraph(issueId: string, agentId: string): Promise<PlannerGraphMetadata> {
     const root = await startPlannerRoot(issueId, agentId);
     return {
@@ -148,6 +192,7 @@ export function issueRunGraphService(db: Db) {
     if (root.runType !== "planner") throw conflict("Worker fan-out requires a planner root");
 
     const issueId = readIssueId(root.contextSnapshot);
+    const swarmPlan = readSwarmPlan(root.contextSnapshot);
     const existingChildren = await db
       .select({ count: sql<number>`count(*)` })
       .from(heartbeatRuns)
@@ -165,23 +210,29 @@ export function issueRunGraphService(db: Db) {
     const inserted = await db
       .insert(heartbeatRuns)
       .values(
-        workers.map((worker) => ({
-          companyId: root.companyId,
-          agentId: worker.agentId ?? root.agentId,
-          invocationSource: worker.invocationSource ?? "assignment",
-          triggerDetail: worker.triggerDetail ?? "system",
-          status: worker.status ?? "queued",
-          runType: "worker",
-          rootRunId: root.id,
-          parentRunId: root.id,
-          graphDepth: (root.graphDepth ?? 0) + 1,
-          repairAttempt: 0,
-          contextSnapshot: {
-            issueId,
-            ...(worker.contextSnapshot ?? {}),
-            ...(worker.taskKey ? { taskKey: worker.taskKey } : {}),
-          },
-        })),
+        workers.map((worker) => {
+          const normalizedSubtask = worker.subtask ? swarmSubtaskSchema.parse(worker.subtask) : null;
+          return {
+            companyId: root.companyId,
+            agentId: worker.agentId ?? root.agentId,
+            invocationSource: worker.invocationSource ?? "assignment",
+            triggerDetail: worker.triggerDetail ?? "system",
+            status: worker.status ?? "queued",
+            runType: "worker",
+            rootRunId: root.id,
+            parentRunId: root.id,
+            graphDepth: (root.graphDepth ?? 0) + 1,
+            repairAttempt: 0,
+            contextSnapshot: {
+              issueId,
+              ...(worker.contextSnapshot ?? {}),
+              ...(worker.taskKey ? { taskKey: worker.taskKey } : {}),
+              ...(normalizedSubtask ? { swarmSubtask: normalizedSubtask } : {}),
+              ...(normalizedSubtask?.id ? { swarmSubtaskId: normalizedSubtask.id } : {}),
+              ...(swarmPlan ? { swarmPlanVersion: swarmPlan.version } : {}),
+            },
+          };
+        }),
       )
       .returning();
 
@@ -311,6 +362,7 @@ export function issueRunGraphService(db: Db) {
   }
 
   return {
+    attachSwarmPlan,
     getIssueSummary,
     resolvePlannerGraph,
     scheduleRepairFromVerification,

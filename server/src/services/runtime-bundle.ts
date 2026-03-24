@@ -1,7 +1,17 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { agents, companies, heartbeatRuns, issues, projects } from "@paperclipai/db";
-import type { OrchestrationPolicySnapshot, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
+import {
+  swarmPlanSchema,
+  swarmSubtaskSchema,
+} from "@paperclipai/shared";
+import type {
+  OrchestrationPolicySnapshot,
+  RuntimeBundle,
+  RuntimeBundleTarget,
+  SwarmPlan,
+  SwarmSubtask,
+} from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
 import { sharedContextService } from "./shared-context-publications.js";
@@ -24,6 +34,33 @@ function resolveMaxRepairAttempts(policy: OrchestrationPolicySnapshot | null | u
 
 function requiresHumanArtifacts(evidencePolicy: string) {
   return evidencePolicy === "code_ci_evaluator_summary_artifacts";
+}
+
+function readSwarmPlan(candidate: unknown): SwarmPlan | null {
+  const parsed = swarmPlanSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+function readSwarmSubtask(candidate: unknown): SwarmSubtask | null {
+  const parsed = swarmSubtaskSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+function resolveCurrentSwarmSubtask(input: {
+  swarmPlan: SwarmPlan | null;
+  currentRunContext: Record<string, unknown> | null | undefined;
+}): SwarmSubtask | null {
+  const directSubtask = readSwarmSubtask(input.currentRunContext?.swarmSubtask);
+  if (directSubtask) return directSubtask;
+
+  const subtaskId = typeof input.currentRunContext?.swarmSubtaskId === "string"
+    ? input.currentRunContext.swarmSubtaskId
+    : typeof input.currentRunContext?.taskKey === "string"
+      ? input.currentRunContext.taskKey
+      : null;
+  if (!subtaskId || !input.swarmPlan) return null;
+
+  return input.swarmPlan.subtasks.find((subtask) => subtask.id === subtaskId || subtask.taskKey === subtaskId) ?? null;
 }
 
 export function resolveRuntimeBundleTarget(adapterType: string | null | undefined): RuntimeBundleTarget | null {
@@ -99,6 +136,7 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
             repairAttempt: heartbeatRuns.repairAttempt,
             verificationVerdict: heartbeatRuns.verificationVerdict,
             policySnapshotJson: heartbeatRuns.policySnapshotJson,
+            contextSnapshot: heartbeatRuns.contextSnapshot,
           })
           .from(heartbeatRuns)
           .where(eq(heartbeatRuns.id, input.runId))
@@ -122,6 +160,22 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         .where(eq(projects.id, issue.projectId))
         .then((rows) => rows[0] ?? null)
     : null;
+
+  const plannerRoot = run?.rootRunId
+    ? await db
+        .select({
+          id: heartbeatRuns.id,
+          contextSnapshot: heartbeatRuns.contextSnapshot,
+        })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, run.rootRunId))
+        .then((rows) => rows[0] ?? null)
+    : null;
+  const swarmPlan = readSwarmPlan(run?.contextSnapshot?.swarmPlan ?? plannerRoot?.contextSnapshot?.swarmPlan);
+  const currentSwarmSubtask = resolveCurrentSwarmSubtask({
+    swarmPlan,
+    currentRunContext: (run?.contextSnapshot ?? null) as Record<string, unknown> | null,
+  });
 
   const policySnapshot = (run?.policySnapshotJson ?? null) as OrchestrationPolicySnapshot | null;
   const maxRepairAttempts = resolveMaxRepairAttempts(policySnapshot);
@@ -188,6 +242,10 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
       latestVerificationRunId: issue.lastVerificationRunId ?? null,
       reviewReadyAt: issue.reviewReadyAt ? new Date(issue.reviewReadyAt).toISOString() : null,
       runner: effectiveRunner,
+    },
+    swarm: {
+      plan: swarmPlan,
+      currentSubtask: currentSwarmSubtask,
     },
     memory: {
       snippets: [

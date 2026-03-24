@@ -83,6 +83,14 @@ export type {
 } from "./heartbeat.js";
 export type {
   OrchestrationPolicySnapshot,
+  SwarmSubtaskKind,
+  SwarmArtifactKind,
+  SwarmModelTier,
+  SwarmPathOwnershipMode,
+  SwarmArtifactRequirement,
+  SwarmSubtask,
+  SwarmPlan,
+  RuntimeBundleSwarm,
   HeartbeatRunArtifact,
   OrchestrationArtifactBundle,
   OrchestrationArtifactBundleItem,

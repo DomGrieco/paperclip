@@ -190,6 +190,87 @@ describe("run graph schema contract", () => {
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
   }, 20_000);
 
+  it("persists validated swarm plans on planner roots and bounded subtask packets on workers", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Persist swarm packets",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const plannerWithPlan = await graph.attachSwarmPlan(planner.id, {
+      version: "v1",
+      plannerRunId: planner.id,
+      generatedAt: "2026-03-24T18:55:00.000Z",
+      subtasks: [
+        {
+          id: "subtask-1",
+          kind: "research",
+          title: "Inspect logs",
+          goal: "Read the heartbeat logs and summarize failures.",
+          taskKey: "inspect-logs",
+          expectedArtifacts: [{ kind: "summary", required: true }],
+          acceptanceChecks: ["Summary cites the failing log path."],
+          recommendedModelTier: "cheap",
+        },
+      ],
+    });
+    const [worker] = await graph.spawnWorkers(planner.id, [
+      {
+        taskKey: "inspect-logs",
+        subtask: {
+          id: "subtask-1",
+          kind: "research",
+          title: "Inspect logs",
+          goal: "Read the heartbeat logs and summarize failures.",
+          taskKey: "inspect-logs",
+          expectedArtifacts: [{ kind: "summary", required: true }],
+          acceptanceChecks: ["Summary cites the failing log path."],
+          recommendedModelTier: "cheap",
+        },
+      },
+    ]);
+
+    expect(plannerWithPlan.contextSnapshot).toEqual(
+      expect.objectContaining({
+        swarmPlan: expect.objectContaining({
+          version: "v1",
+          plannerRunId: planner.id,
+        }),
+      }),
+    );
+    expect(worker.contextSnapshot).toEqual(
+      expect.objectContaining({
+        issueId: issue.id,
+        taskKey: "inspect-logs",
+        swarmSubtaskId: "subtask-1",
+        swarmPlanVersion: "v1",
+        swarmSubtask: expect.objectContaining({
+          id: "subtask-1",
+          recommendedModelTier: "cheap",
+        }),
+      }),
+    );
+  }, 20_000);
+
   it("queues a repair worker when verification returns repair and retries remain", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);

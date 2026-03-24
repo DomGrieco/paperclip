@@ -15,6 +15,7 @@ import {
   heartbeatRuns,
   sharedContextPublications,
 } from "@paperclipai/db";
+import { issueRunGraphService } from "../services/issue-run-graph.js";
 import { resolveRuntimeBundle } from "../services/runtime-bundle.js";
 
 type EmbeddedPostgresInstance = {
@@ -227,6 +228,10 @@ describe("resolveRuntimeBundle", () => {
         sandboxed: false,
         isolationBoundary: "host_process",
       },
+    });
+    expect(bundle.swarm).toEqual({
+      plan: null,
+      currentSubtask: null,
     });
     expect(bundle.projection.runtime).toBe("codex");
   }, 20_000);
@@ -489,6 +494,106 @@ describe("resolveRuntimeBundle", () => {
           freshness: "recent",
         }),
       ]),
+    );
+  }, 20_000);
+
+  it("projects planner swarm plans and worker subtasks into the runtime bundle", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Fan out bounded work",
+      description: "Planner should pass bounded subtask context to workers.",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    await graph.attachSwarmPlan(planner.id, {
+      version: "v1",
+      plannerRunId: planner.id,
+      generatedAt: "2026-03-24T18:55:00.000Z",
+      rationale: "Split the work into a code slice and a verification slice.",
+      subtasks: [
+        {
+          id: "worker-heartbeat-ui",
+          kind: "implementation",
+          title: "Update heartbeat UI labels",
+          goal: "Render request/start states distinctly in the issue timeline.",
+          taskKey: "heartbeat-ui",
+          allowedPaths: ["ui/src/components/ActivityRow.tsx"],
+          ownershipMode: "exclusive",
+          expectedArtifacts: [{ kind: "patch", required: true }],
+          acceptanceChecks: ["UI shows heartbeat.requested and heartbeat.started distinctly."],
+          recommendedModelTier: "balanced",
+          budgetCents: 25,
+          maxRuntimeSec: 900,
+        },
+      ],
+    });
+    const [worker] = await graph.spawnWorkers(planner.id, [
+      {
+        taskKey: "heartbeat-ui",
+        subtask: {
+          id: "worker-heartbeat-ui",
+          kind: "implementation",
+          title: "Update heartbeat UI labels",
+          goal: "Render request/start states distinctly in the issue timeline.",
+          taskKey: "heartbeat-ui",
+          allowedPaths: ["ui/src/components/ActivityRow.tsx"],
+          ownershipMode: "exclusive",
+          expectedArtifacts: [{ kind: "patch", required: true }],
+          acceptanceChecks: ["UI shows heartbeat.requested and heartbeat.started distinctly."],
+          recommendedModelTier: "balanced",
+          budgetCents: 25,
+          maxRuntimeSec: 900,
+        },
+      },
+    ]);
+
+    const bundle = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runId: worker.id,
+      runtime: "codex",
+    });
+
+    expect(bundle.swarm.plan).toEqual(
+      expect.objectContaining({
+        version: "v1",
+        plannerRunId: planner.id,
+        subtasks: [
+          expect.objectContaining({
+            id: "worker-heartbeat-ui",
+            taskKey: "heartbeat-ui",
+            recommendedModelTier: "balanced",
+          }),
+        ],
+      }),
+    );
+    expect(bundle.swarm.currentSubtask).toEqual(
+      expect.objectContaining({
+        id: "worker-heartbeat-ui",
+        title: "Update heartbeat UI labels",
+        allowedPaths: ["ui/src/components/ActivityRow.tsx"],
+        ownershipMode: "exclusive",
+      }),
     );
   }, 20_000);
 });

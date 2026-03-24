@@ -16,6 +16,45 @@ export interface OrchestrationPolicySnapshot {
 
 export type RuntimeBundleTarget = "codex" | "cursor" | "opencode" | "hermes";
 export type RuntimeBundleTddMode = "required";
+export type SwarmSubtaskKind = "research" | "implementation" | "verification" | "review";
+export type SwarmArtifactKind = "summary" | "patch" | "test_result" | "comment" | "document";
+export type SwarmModelTier = "cheap" | "balanced" | "premium";
+export type SwarmPathOwnershipMode = "exclusive" | "advisory" | "read_only";
+
+export interface SwarmArtifactRequirement {
+  kind: SwarmArtifactKind;
+  required: boolean;
+}
+
+export interface SwarmSubtask {
+  id: string;
+  kind: SwarmSubtaskKind;
+  title: string;
+  goal: string;
+  taskKey?: string | null;
+  allowedPaths?: string[] | null;
+  forbiddenPaths?: string[] | null;
+  ownershipMode?: SwarmPathOwnershipMode | null;
+  expectedArtifacts: SwarmArtifactRequirement[];
+  acceptanceChecks: string[];
+  recommendedModelTier: SwarmModelTier;
+  budgetCents?: number | null;
+  maxRuntimeSec?: number | null;
+  dependsOn?: string[] | null;
+}
+
+export interface SwarmPlan {
+  version: "v1";
+  plannerRunId?: string | null;
+  generatedAt?: string | null;
+  rationale?: string | null;
+  subtasks: SwarmSubtask[];
+}
+
+export interface RuntimeBundleSwarm {
+  plan: SwarmPlan | null;
+  currentSubtask: SwarmSubtask | null;
+}
 
 export interface RuntimeBundlePolicy {
   tddMode: RuntimeBundleTddMode;
@@ -225,6 +264,7 @@ export interface RuntimeBundle {
   policy: RuntimeBundlePolicy;
   runner: RuntimeBundleRunner;
   verification: RuntimeBundleVerification;
+  swarm: RuntimeBundleSwarm;
   memory: RuntimeBundleMemoryPacket;
   projection: RuntimeBundleProjection;
 }
