@@ -203,6 +203,86 @@ describe("heartbeat verification output ingestion", () => {
     expect(finalized.status).toBe("succeeded");
   }, 20_000);
 
+  it("aligns assignment-backed planner start timing with agent heartbeat state", async () => {
+    let releaseExecution: (() => void) | null = null;
+    adapterMocks.execute.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseExecution = () => {
+            resolve({
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+            });
+          };
+        }),
+    );
+
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Hermes CEO",
+      role: "ceo",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Planner start observability",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const run = await heartbeat.wakeup(agent.id, {
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: { issueId: issue.id, mutation: "update" },
+      contextSnapshot: {
+        source: "issue.update",
+        issueId: issue.id,
+        wakeReason: "issue_assigned",
+      },
+    });
+
+    expect(run).not.toBeNull();
+    expect(run?.runType).toBe("planner");
+    expect(run?.rootRunId).toBe(run?.id);
+    expect(run?.parentRunId).toBeNull();
+
+    await heartbeat.resumeQueuedRuns();
+
+    const runningAgent = await waitForAgentHeartbeatStart(db, agent.id);
+    const runningRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run!.id)).then((rows) => rows[0] ?? null);
+
+    expect(runningAgent.status).toBe("running");
+    expect(runningRun?.status).toBe("running");
+    expect(runningRun?.runType).toBe("planner");
+    expect(runningRun?.startedAt).not.toBeNull();
+    expect(runningRun?.contextSnapshot).toEqual(
+      expect.objectContaining({
+        issueId: issue.id,
+        wakeReason: "issue_assigned",
+      }),
+    );
+    expect(new Date(runningAgent.lastHeartbeatAt!).toISOString()).toBe(
+      new Date(runningRun!.startedAt!).toISOString(),
+    );
+
+    releaseExecution?.();
+    const finalized = await waitForRunTerminalState(db, run!.id);
+    expect(finalized.status).toBe("succeeded");
+  }, 20_000);
+
   it("persists adapter-reported verification verdicts and syncs the issue evidence bundle", async () => {
     adapterMocks.execute.mockResolvedValue({
       exitCode: 0,
