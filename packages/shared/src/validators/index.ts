@@ -106,6 +106,14 @@ export {
 } from "./work-product.js";
 
 export {
+  createSharedContextPublicationSchema,
+  sharedContextVisibilitySchema,
+  sharedContextStatusSchema,
+  sharedContextFreshnessSchema,
+  type CreateSharedContextPublication,
+} from "./shared-context.js";
+
+export {
   updateExecutionWorkspaceSchema,
   executionWorkspaceStatusSchema,
   type UpdateExecutionWorkspace,

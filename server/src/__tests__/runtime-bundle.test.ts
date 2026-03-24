@@ -12,6 +12,7 @@ import {
   issues,
   projects,
   heartbeatRuns,
+  sharedContextPublications,
 } from "@paperclipai/db";
 import { resolveRuntimeBundle } from "../services/runtime-bundle.js";
 
@@ -336,5 +337,131 @@ describe("resolveRuntimeBundle", () => {
         rank: 3,
       },
     ]);
+  }, 20_000);
+
+  it("includes published shared-context items in the runtime recall packet with governance-aware scoping", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({
+      name: "Paperclip",
+      issuePrefix: "TST",
+      description: "Company context",
+    }).returning();
+    const [project] = await db.insert(projects).values({
+      companyId: company.id,
+      name: "Shared Context Project",
+      description: "Project context",
+      status: "in_progress",
+    }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      projectId: project.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "hermes_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      projectId: project.id,
+      title: "Use shared context",
+      description: "Issue context",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    await db.insert(sharedContextPublications).values([
+      {
+        companyId: company.id,
+        title: "Company convention",
+        body: "Prefer reviewable evidence over hidden local memory.",
+        visibility: "company",
+        status: "published",
+        freshness: "recent",
+        rank: 30,
+      },
+      {
+        companyId: company.id,
+        projectId: project.id,
+        title: "Project convention",
+        body: "Use the Paperclip helper before raw curl.",
+        visibility: "project",
+        status: "published",
+        freshness: "recent",
+        rank: 20,
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        title: "Issue finding",
+        body: "The current worker should preserve the containerized execution boundary.",
+        visibility: "issue",
+        status: "published",
+        freshness: "live",
+        rank: 10,
+      },
+      {
+        companyId: company.id,
+        title: "Needs approval",
+        body: "This proposed item must not leak into the runtime recall yet.",
+        visibility: "company",
+        status: "proposed",
+        freshness: "recent",
+      },
+      {
+        companyId: company.id,
+        title: "Targeted to worker",
+        body: "Only the addressed agent should see this targeted context.",
+        visibility: "agent_set",
+        audienceAgentIds: [agent.id],
+        status: "published",
+        freshness: "recent",
+        rank: 15,
+      },
+    ]);
+
+    const bundle = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runId: null,
+      runtime: "hermes",
+    });
+
+    expect(bundle.memory.snippets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "shared_context.issue",
+          content: expect.stringContaining("Issue finding"),
+          freshness: "live",
+          rank: 10,
+        }),
+        expect.objectContaining({
+          source: "shared_context.project",
+          content: expect.stringContaining("Project convention"),
+          freshness: "recent",
+          rank: 20,
+        }),
+        expect.objectContaining({
+          source: "shared_context.agent_set",
+          content: expect.stringContaining("Targeted to worker"),
+          freshness: "recent",
+          rank: 15,
+        }),
+        expect.objectContaining({
+          source: "shared_context.company",
+          content: expect.stringContaining("Company convention"),
+          freshness: "recent",
+          rank: 30,
+        }),
+      ]),
+    );
+    expect(bundle.memory.snippets.some((snippet) => snippet.content.includes("Needs approval"))).toBe(false);
   }, 20_000);
 });

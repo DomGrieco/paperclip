@@ -4,6 +4,7 @@ import { agents, companies, heartbeatRuns, issues, projects } from "@paperclipai
 import type { OrchestrationPolicySnapshot, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
+import { sharedContextService } from "./shared-context-publications.js";
 
 type ResolveRuntimeBundleInput = {
   companyId: string;
@@ -132,6 +133,12 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
     runType: run?.runType ?? null,
     evidencePolicy: issue.evidencePolicy,
   });
+  const sharedContextSnippets = await sharedContextService(db).listRuntimeMemorySnippets({
+    companyId: input.companyId,
+    agentId: agent.id,
+    projectId: project?.id ?? null,
+    issueId: issue.id,
+  });
 
   return {
     runtime: input.runtime,
@@ -236,6 +243,7 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
               },
             ]
           : []),
+        ...sharedContextSnippets,
       ],
     },
     projection: buildRuntimeBundleProjection(input.runtime),

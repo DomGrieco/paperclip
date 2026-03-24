@@ -58,6 +58,42 @@ export interface RuntimeBundleMemoryPacket {
   snippets: RuntimeBundleMemorySnippet[];
 }
 
+export type SharedContextPublicationVisibility =
+  | "company"
+  | "project"
+  | "issue"
+  | "agent_set";
+
+export type SharedContextPublicationStatus =
+  | "published"
+  | "proposed"
+  | "archived";
+
+export type SharedContextFreshness = "static" | "recent" | "live";
+
+export interface SharedContextPublication {
+  id: string;
+  companyId: string;
+  projectId: string | null;
+  issueId: string | null;
+  sourceAgentId: string | null;
+  createdByRunId: string | null;
+  title: string;
+  summary: string | null;
+  body: string;
+  tags: string[];
+  visibility: SharedContextPublicationVisibility;
+  audienceAgentIds: string[];
+  status: SharedContextPublicationStatus;
+  freshness: SharedContextFreshness;
+  freshnessAt: string;
+  confidence: number | null;
+  rank: number;
+  provenance: Record<string, unknown> | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface PaperclipSharedContextScope {
   companyId: string;
   projectId: string | null;
