@@ -33,6 +33,9 @@ ${RUNTIME_NOTE_MARKER}
 - If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
+- After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
+- Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
+- Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 Your Paperclip identity:
   Agent ID: {{agentId}}
@@ -96,8 +99,43 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
 - If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
+- After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
+- Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
+- Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
-${existingPromptTemplate}`;
+${existingPromptTemplate}
+
+Your Paperclip identity:
+  Agent ID: {{agentId}}
+  Company ID: {{companyId}}
+  API Base: {{paperclipApiUrl}}
+
+{{#taskId}}
+## Assigned Task
+
+Issue ID: {{taskId}}
+Title: {{taskTitle}}
+
+{{taskBody}}
+
+## Workflow
+
+1. Read \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\` before working.
+2. Use the runtime bundle plus the current task details as your source of truth.
+3. Complete the task using your tools.
+4. When done, update the issue status:
+   \`$PAPERCLIP_API_HELPER_PATH patch /api/issues/{{taskId}} --json '{"status":"done"}'\`
+5. Report what you changed and any evidence/artifacts produced.
+{{/taskId}}
+
+{{#noTask}}
+## Heartbeat Wake
+
+1. Check your assigned todo issues:
+   \`$PAPERCLIP_API_HELPER_PATH get "/api/companies/{{companyId}}/issues?assigneeAgentId={{agentId}}&status=todo"\`
+2. If an issue is available, pick the highest-priority one, work it, and update its status when complete.
+3. If nothing is assigned, exit briefly and clearly.
+{{/noTask}}`;
 }
 
 async function materializePaperclipApiHelper(runtimeRoot: string): Promise<string> {

@@ -139,6 +139,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
 
     const instructions = await fs.readFile(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH, "utf8");
     expect(instructions).toContain("Paperclip hermes runtime projection");
+    expect(instructions).toContain("Do not spend the run broadly spelunking the environment");
+    expect(instructions).toContain("Prefer the narrowest path that completes the assigned work");
 
     const helper = await fs.readFile(env.PAPERCLIP_API_HELPER_PATH, "utf8");
     expect(helper).toContain("urllib.request");
@@ -182,6 +184,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(String(nextConfig.promptTemplate)).toContain("shared context packet");
     expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_HELPER_PATH");
     expect(String(nextConfig.promptTemplate)).toContain("Treat raw `curl` as last-resort debugging only");
+    expect(String(nextConfig.promptTemplate)).toContain("do not broadly spelunk the environment");
+    expect(String(nextConfig.promptTemplate)).toContain("finish decisively");
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.3-codex");
   });

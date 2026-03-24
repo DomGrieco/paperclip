@@ -154,6 +154,8 @@ function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): st
     `# Paperclip ${runtime} runtime projection`,
     "",
     "Start by reading the canonical JSON files in this directory, especially bundle.json, policy.json, runner.json, and verification.json.",
+    "Do not spend the run broadly spelunking the environment after those files are confirmed readable.",
+    "Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.",
     "",
     "## Issue",
     `- id: ${asString(issue.id, "unknown")}`,
