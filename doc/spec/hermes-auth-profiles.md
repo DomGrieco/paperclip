@@ -219,7 +219,104 @@ A Hermes auth-profile slice is not done until:
 - any bootstrap source is not writable by the worker runtime
 - the Paperclip control-plane filesystem is not exposed as a writable worker mount
 
-## 14. Future extensions
+## 14. Verified Hermes setup surfaces from the local Hermes codebase
+
+The local Hermes implementation confirms that Paperclip must model Hermes bootstrap as three distinct state classes rather than as one opaque copied directory.
+
+### 14.1 Structured config in `config.yaml`
+
+Hermes stores non-secret runtime behavior in `~/.hermes/config.yaml`.
+
+Important first-class sections verified in the local repo:
+- `model`
+  - `provider`
+  - `default`
+  - `base_url`
+  - optional provider-specific flags such as `api_mode`
+- `auxiliary`
+  - per-task provider/model/base_url/api_key routing for vision, web extract, compression, session search, MCP helper work, memory flushes, and approvals
+- `terminal`
+  - backend
+  - cwd
+  - timeout
+  - container image/resource defaults
+  - ssh / remote execution defaults
+- `tts` and `stt`
+- `toolsets` and `platform_toolsets`
+- `mcp_servers`
+- agent/runtime settings such as memory, compression, approvals, delegation, browser, and display behavior
+
+### 14.2 Secret env in `.env`
+
+Hermes stores many secret or deployment-specific values in `~/.hermes/.env`.
+
+Examples verified in the local repo/docs:
+- provider API keys (`OPENROUTER_API_KEY`, `GLM_API_KEY`, `KIMI_API_KEY`, `MINIMAX_API_KEY`, etc.)
+- custom endpoint secrets (`OPENAI_API_KEY`)
+- browser/search/image/tool provider keys
+- messaging gateway tokens and allowed-user env vars
+- some backend override values
+
+These should map to Paperclip-managed secrets, not be treated as durable plaintext canonical state.
+
+### 14.3 Provider auth store in `auth.json`
+
+Hermes stores refreshable provider auth/session state in `~/.hermes/auth.json`.
+
+Verified examples include:
+- `active_provider`
+- provider-specific OAuth/device-code/session payloads
+- Codex auth state separate from `config.yaml`
+- refresh metadata and provider state that runtime resolution consults directly
+
+Paperclip should treat this as provider-auth state that is projected into a worker-compatible `auth.json`, not as an incidental file blob.
+
+## 15. Paperclip bootstrap profile mapping
+
+Based on the verified Hermes setup model, Paperclip should map Hermes bootstrap into these control-plane buckets:
+
+### 15.1 Structured bootstrap config
+
+Paperclip-managed structured state should eventually cover at least:
+- primary model/provider/base URL/default model
+- auxiliary provider/model routing
+- terminal defaults
+- TTS/STT defaults
+- toolset enablement / platform toolsets
+- MCP server definitions
+- selected safe runtime defaults from agent/display/memory/compression settings
+
+### 15.2 Managed secrets
+
+Paperclip secrets should hold:
+- API keys
+- gateway/platform tokens
+- custom endpoint auth
+- MCP headers/env secrets
+- other secret-valued `.env` entries
+
+### 15.3 Managed provider auth records
+
+Paperclip should maintain provider-auth state separately from generic secrets.
+This is the right home for refreshable OAuth/device-code state that Hermes would otherwise keep in `auth.json`.
+
+### 15.4 Compatibility projection layer
+
+Until every Hermes setup surface is fully modeled in structured Paperclip entities, Paperclip may project compatible file fragments into:
+- `config.yaml`
+- `.env`
+- `auth.json`
+
+But those files are runtime artifacts, not the long-term source of truth.
+
+## 16. Next implementation target
+
+The next narrow implementation slice should:
+- import a real Hermes home into a structured Paperclip bootstrap classification
+- summarize the imported provider/model/tool/MCP surfaces for observability and review
+- materialize worker bootstrap files from that imported classification without keeping the original source mounted in the steady-state runtime path
+
+## 17. Future extensions
 
 Later enhancements can add:
 - first-class auth profile DB tables and UI
