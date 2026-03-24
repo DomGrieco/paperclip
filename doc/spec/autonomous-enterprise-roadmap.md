@@ -141,3 +141,32 @@ The first program milestone is complete only when Paperclip can reliably take a 
 6. clear review-ready terminal state for human oversight
 
 That is the smallest complete loop that proves the architecture is working.
+
+## 8. Current Program Status (2026-03-24)
+
+The current branch/history shows that the program has advanced from architecture-only work into a partially working local-first software-company loop.
+
+Strongly landed or evidenced now:
+- durable planner/worker/verification-oriented run graph foundations
+- runner-plane and runtime-bundle foundations sufficient to run Hermes workers in isolated containers locally
+- shared-context packet publication/materialization foundations
+- live issue-backed Hermes CEO planner execution succeeding through Paperclip with helper-first API usage and persisted logs
+- heartbeat observability improvements aligning `agents.lastHeartbeatAt` with execution start semantics
+
+The most important remaining gaps before the first milestone should be treated as complete:
+- stronger automated integration coverage for assignment-backed orchestration and review/evidence semantics
+- cleaner operator/browser flows in authenticated local dogfood mode
+- more reviewable UI presentation of run graphs, evidence, and shared context
+- fuller managed runtime bootstrap so long-term production operation does not depend on host-local Hermes state
+
+## 9. Remaining Program Sequence After The Current Branch
+
+Recommended priority order from here:
+
+1. Dogfood cleanup + orchestration regression coverage
+2. Authenticated-mode operator/bootstrap/browser UX hardening
+3. Paperclip-managed Hermes bootstrap/materialization
+4. Shared skill governance and richer shared-memory publication flows
+5. Review/evidence UI hardening
+6. Cleaner runner-service separation and future remote-runner generalization
+7. Later enterprise connector expansion once the software-company loop is genuinely stable

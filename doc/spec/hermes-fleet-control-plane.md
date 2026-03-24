@@ -494,3 +494,22 @@ A Hermes fleet slice is not done until it passes:
 7. Support Dockerized Paperclip plus isolated worker containers through a runner boundary, not default DinD.
 8. Evolve `hermes_local` into a broader Hermes runtime family with `hermes_container` as the production target.
 9. Treat browser dogfooding and end-to-end runtime validation as required for every control-plane slice touching execution.
+
+## 17. Current Delivery Status (2026-03-24)
+
+The current branch/history has validated the architecture direction enough to treat several pieces as implemented foundations rather than open questions.
+
+Working or strongly evidenced now:
+- `hermes_local` is no longer the only meaningful Hermes path; `hermes_container` planning, launch plumbing, and live worker heartbeats exist.
+- Paperclip can materialize governed runtime artifacts into Hermes workspaces, including runtime bundle files, shared-context packets, helper scripts, and runtime instructions.
+- Paperclip-governed shared-context publication has an initial persisted foundation.
+- Prompt/runtime discipline for unattended Hermes workers has been tightened to favor helper-based API access, narrow-scope execution, and decisive completion.
+- The heartbeat observability gap around `agents.lastHeartbeatAt` vs run start has been corrected in code and validated with live evidence.
+- A fresh issue-backed Hermes CEO planner run has succeeded live inside `hermes_container`, which materially de-risks the control-plane/runtime contract.
+
+Major items still remaining before the fleet architecture feels complete:
+- operator-quality authenticated bootstrap and browser dogfood flow
+- stronger automated regression coverage for assignment-backed planner execution, observability, and shared-context/runtime behavior
+- review-friendly UI surfaces for run graphs, evidence, and shared context
+- Paperclip-managed Hermes bootstrap/materialization that removes host `~/.hermes` as the long-term production dependency
+- richer shared skill governance, shared memory browsing, and structured inter-agent communication beyond the current foundation

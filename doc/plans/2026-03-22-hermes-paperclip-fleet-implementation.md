@@ -34,6 +34,29 @@
 4. Dockerized deployment topology for Paperclip + worker containers
 5. Browser-tested Paperclip flows for configuring and operating Hermes workers
 
+## Progress Snapshot (2026-03-24)
+
+The program has moved beyond pure planning and now has a meaningful working spine in the repo.
+
+Landed or strongly validated on the current branch/history:
+- Hermes fleet control-plane docs and cross-links
+- Hermes adapter UI + Docker runtime support
+- runtime bundle materialization into worker workspaces
+- Hermes runtime projection with helper-first Paperclip API access
+- shared context packet materialization and shared-context publication foundation
+- runner-plane contract, Hermes container planning/launch plumbing, and isolated worker-container heartbeats
+- private authenticated hostname fixes for Hermes container API access
+- heartbeat observability fix so `agents.lastHeartbeatAt` is updated when execution starts
+- prompt-discipline hardening, including issue-backed task workflow preservation for custom/fallback Hermes prompts
+- live issue-backed Hermes CEO planner validation showing a successful assignment-backed run in `hermes_container`
+
+Still remaining for the first serious fleet milestone:
+- stronger automated integration coverage for assignment-backed planner execution and observability semantics
+- cleaner authenticated-mode browser/operator flow for bootstrap, sign-in, company creation, and repeatable dogfood setup
+- better UI review/evidence surfaces for planner/worker/verification runs and shared context
+- managed Hermes bootstrap/materialization that does not depend on host `~/.hermes` as the long-term runtime source
+- fuller shared skill governance and richer shared-memory / inter-agent publication workflows
+
 ## File Targets Likely To Change
 
 ### Docs / specs
