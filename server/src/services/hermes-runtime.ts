@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
-import type { RuntimeBundle } from "@paperclipai/shared";
+import type { HermesBootstrapImportSummary, RuntimeBundle } from "@paperclipai/shared";
 import { resolveCompanyHermesHomeDir } from "../home-paths.js";
+import { importHermesBootstrapFromHome } from "./hermes-bootstrap.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
@@ -12,6 +13,8 @@ const INLINE_HERMES_BOOTSTRAP_ENV_NAMES = {
   authJson: "PAPERCLIP_HERMES_AUTH_JSON",
   envFile: "PAPERCLIP_HERMES_ENV",
   configYaml: "PAPERCLIP_HERMES_CONFIG_YAML",
+  importHome: "PAPERCLIP_HERMES_IMPORT_HOME",
+  summaryJson: "PAPERCLIP_HERMES_BOOTSTRAP_SUMMARY_JSON",
 } as const;
 const SHARED_CONTEXT_FILE = "shared-context.json";
 const PAPERCLIP_RUNTIME_ROOT = path.join(".paperclip", "runtime");
@@ -260,6 +263,21 @@ function clearInlineHermesBootstrapEnv(env: Record<string, string>): void {
   delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.configYaml];
 }
 
+function clearHermesBootstrapImportHints(env: Record<string, string>): void {
+  delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.importHome];
+}
+
+function setHermesBootstrapSummaryEnv(
+  env: Record<string, string>,
+  summary: HermesBootstrapImportSummary | null,
+): void {
+  if (!summary) {
+    delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.summaryJson];
+    return;
+  }
+  env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.summaryJson] = JSON.stringify(summary);
+}
+
 function sanitizeSharedHermesEnvFile(content: string): string {
   return content
     .split(/\r?\n/)
@@ -384,15 +402,26 @@ export async function prepareHermesAdapterConfigForExecution(input: {
     (readString(input.companyId) ? resolveCompanyHermesHomeDir(readString(input.companyId)!) : null) ??
     path.join(input.cwd, ".paperclip", "hermes-home");
   const inlineBootstrap = resolveInlineHermesBootstrapPayload(env);
+  const importHome = readString(env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.importHome]);
   const sharedSource =
     readString(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
+  let importedBootstrapSummary: HermesBootstrapImportSummary | null = null;
   if (hasInlineHermesBootstrapPayload(inlineBootstrap)) {
     await materializeInlineHermesBootstrapProfile({ workerHome: managedHome, payload: inlineBootstrap });
+  } else if (importHome) {
+    const importedBootstrap = await importHermesBootstrapFromHome({ homePath: importHome });
+    importedBootstrapSummary = importedBootstrap.summary;
+    await materializeInlineHermesBootstrapProfile({
+      workerHome: managedHome,
+      payload: importedBootstrap.payload,
+    });
   } else {
     await syncSharedHermesAuthProfile({ workerHome: managedHome, sharedSource });
   }
   clearInlineHermesBootstrapEnv(env);
+  clearHermesBootstrapImportHints(env);
   delete env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE;
+  setHermesBootstrapSummaryEnv(env, importedBootstrapSummary);
   const authStore = (await readHermesAuthStore(managedHome)) ?? (managedHome !== sharedSource ? await readHermesAuthStore(sharedSource) : null);
   env.HERMES_HOME = managedHome;
   env.TERMINAL_CWD = input.cwd;
@@ -400,15 +429,21 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   const currentProvider = readString(input.config.provider);
   const currentModel = readString(input.config.model);
   const activeProvider = readString(authStore?.active_provider) ?? readString(authStore?.provider);
+  const bootstrapConfiguredProvider = readString(importedBootstrapSummary?.configuredProvider);
+  const bootstrapDefaultModel = readString(importedBootstrapSummary?.defaultModel);
 
-  if (!currentProvider && activeProvider) {
-    nextConfig.provider = activeProvider;
+  if (!currentProvider && (activeProvider ?? bootstrapConfiguredProvider)) {
+    nextConfig.provider = activeProvider ?? bootstrapConfiguredProvider;
   }
   if (isDefaultLikeModel(currentModel)) {
-    const providerForDefault = currentProvider ?? activeProvider;
-    const defaultModel = defaultModelForProvider(providerForDefault);
-    if (defaultModel) {
-      nextConfig.model = defaultModel;
+    if (bootstrapDefaultModel) {
+      nextConfig.model = bootstrapDefaultModel;
+    } else {
+      const providerForDefault = currentProvider ?? activeProvider ?? bootstrapConfiguredProvider;
+      const defaultModel = defaultModelForProvider(providerForDefault);
+      if (defaultModel) {
+        nextConfig.model = defaultModel;
+      }
     }
   }
 

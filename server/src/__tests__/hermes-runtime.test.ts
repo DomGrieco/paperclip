@@ -237,6 +237,87 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(copiedConfig).not.toContain("cwd: /tmp/host-cwd");
   });
 
+  it("imports an existing Hermes home into managed runtime files without leaving import hints in env", async () => {
+    const cwd = await makeTempDir();
+    const importHome = await makeTempDir();
+    await fs.writeFile(
+      path.join(importHome, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex", providers: { "openai-codex": { tokens: { access_token: "secret" } } } }) + "\n",
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(importHome, ".env"),
+      ["OPENROUTER_API_KEY=imported-secret", "TERMINAL_CWD=/tmp/host-only", ""].join("\n"),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(importHome, "config.yaml"),
+      [
+        "model:",
+        "  provider: openai-codex",
+        "  default: gpt-5.4",
+        "terminal:",
+        "  backend: local",
+        "  cwd: /tmp/host-only",
+        "mcp_servers:",
+        "  github:",
+        "    command: npx",
+        "platform_toolsets:",
+        "  cli:",
+        "    - hermes-cli",
+        "toolsets:",
+        "  - hermes-cli",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        env: {
+          PAPERCLIP_HERMES_IMPORT_HOME: importHome,
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle(),
+      authToken: null,
+    });
+
+    const env = nextConfig.env as Record<string, string | undefined>;
+    expect(env.PAPERCLIP_HERMES_IMPORT_HOME).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_BOOTSTRAP_SUMMARY_JSON).toBeTruthy();
+
+    const summary = JSON.parse(String(env.PAPERCLIP_HERMES_BOOTSTRAP_SUMMARY_JSON)) as {
+      activeProvider: string | null;
+      configuredProvider: string | null;
+      defaultModel: string | null;
+      mcpServerNames: string[];
+      enabledPlatforms: string[];
+      secretEnvKeys: string[];
+    };
+    expect(summary.activeProvider).toBe("openai-codex");
+    expect(summary.configuredProvider).toBe("openai-codex");
+    expect(summary.defaultModel).toBe("gpt-5.4");
+    expect(summary.mcpServerNames).toEqual(["github"]);
+    expect(summary.enabledPlatforms).toEqual(["cli"]);
+    expect(summary.secretEnvKeys).toEqual(["OPENROUTER_API_KEY", "TERMINAL_CWD"]);
+
+    const hermesHome = String(env.HERMES_HOME);
+    const copiedAuth = await fs.readFile(path.join(hermesHome, "auth.json"), "utf8");
+    const copiedEnv = await fs.readFile(path.join(hermesHome, ".env"), "utf8");
+    const copiedConfig = await fs.readFile(path.join(hermesHome, "config.yaml"), "utf8");
+    expect(copiedAuth).toContain("openai-codex");
+    expect(copiedEnv).toContain("OPENROUTER_API_KEY=imported-secret");
+    expect(copiedEnv).not.toContain("TERMINAL_CWD=/tmp/host-only");
+    expect(copiedConfig).toContain("provider: openai-codex");
+    expect(copiedConfig).not.toContain("cwd: /tmp/host-only");
+    expect(nextConfig.provider).toBe("openai-codex");
+    expect(nextConfig.model).toBe("gpt-5.4");
+  });
+
   it("prepends the runtime note to an existing custom prompt template without overwriting explicit credentials", async () => {
     const cwd = await makeTempDir();
     const sharedSource = await makeTempDir();

@@ -130,6 +130,24 @@ export interface RuntimeBundleRunner {
   isolationBoundary: "host_process" | "adapter_runtime" | "container_process" | "cloud_sandbox";
 }
 
+export interface HermesBootstrapImportSummary {
+  sourceHomePath: string;
+  hasAuthJson: boolean;
+  hasConfigYaml: boolean;
+  hasEnvFile: boolean;
+  activeProvider: string | null;
+  authProviderIds: string[];
+  configuredProvider: string | null;
+  defaultModel: string | null;
+  configuredBaseUrl: string | null;
+  terminalBackend: string | null;
+  terminalCwd: string | null;
+  mcpServerNames: string[];
+  enabledPlatforms: string[];
+  enabledToolsets: string[];
+  secretEnvKeys: string[];
+}
+
 export interface HermesContainerMountPlan {
   kind: "workspace" | "agent_home" | "runtime_bundle" | "shared_auth";
   hostPath: string;

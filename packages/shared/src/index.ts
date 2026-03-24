@@ -216,6 +216,7 @@ export type {
   PaperclipSharedContextProvenance,
   PaperclipSharedContextPacket,
   RuntimeBundleRunner,
+  HermesBootstrapImportSummary,
   HermesContainerMountPlan,
   HermesContainerEnvPlan,
   HermesContainerLaunchPlan,
