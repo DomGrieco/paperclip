@@ -35,6 +35,20 @@ function createMockDb(row: Record<string, unknown>) {
   return { db: { insert } as any, insert, values, returning };
 }
 
+function createUpdateMockDb(existingRow: Record<string, unknown>, updatedRow = existingRow) {
+  const selectWhere = vi.fn(async () => [existingRow]);
+  const selectFrom = vi.fn(() => ({ where: selectWhere }));
+  const select = vi.fn(() => ({ from: selectFrom }));
+  const returning = vi.fn(async () => [updatedRow]);
+  const updateWhere = vi.fn(() => ({ returning }));
+  const set = vi.fn(() => ({ where: updateWhere }));
+  const update = vi.fn(() => ({ set }));
+  return {
+    db: { select, update } as any,
+    set,
+  };
+}
+
 describe("sharedContextService.create", () => {
   it("downgrades agent company-wide publications to proposed governance state", async () => {
     const row = createRow({ visibility: "company", status: "proposed", projectId: null });
@@ -88,5 +102,41 @@ describe("sharedContextService.create", () => {
       }),
     );
     expect(result.status).toBe("published");
+  });
+});
+
+describe("sharedContextService.updateStatus", () => {
+  it("allows board actors to publish proposed company-wide items", async () => {
+    const existingRow = createRow({ visibility: "company", status: "proposed", projectId: null, sourceAgentId: null });
+    const updatedRow = createRow({ visibility: "company", status: "published", projectId: null, sourceAgentId: null });
+    const { db, set } = createUpdateMockDb(existingRow, updatedRow);
+    const svc = sharedContextService(db);
+
+    const result = await svc.updateStatus("company-1", "shared-1", "published", { type: "board" });
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "published", updatedAt: expect.any(Date) }));
+    expect(result.status).toBe("published");
+  });
+
+  it("allows board actors to archive published items", async () => {
+    const existingRow = createRow({ status: "published" });
+    const updatedRow = createRow({ status: "archived" });
+    const { db, set } = createUpdateMockDb(existingRow, updatedRow);
+    const svc = sharedContextService(db);
+
+    const result = await svc.updateStatus("company-1", "shared-1", "archived", { type: "board" });
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ status: "archived", updatedAt: expect.any(Date) }));
+    expect(result.status).toBe("archived");
+  });
+
+  it("rejects agent attempts to self-publish governed items", async () => {
+    const existingRow = createRow({ visibility: "company", status: "proposed", projectId: null });
+    const { db } = createUpdateMockDb(existingRow);
+    const svc = sharedContextService(db);
+
+    await expect(
+      svc.updateStatus("company-1", "shared-1", "published", { type: "agent" }),
+    ).rejects.toThrow("Only board actors can change shared-context governance state");
   });
 });

@@ -25,4 +25,9 @@ export const createSharedContextPublicationSchema = z.object({
   provenance: z.record(z.unknown()).optional().nullable(),
 });
 
+export const updateSharedContextPublicationSchema = z.object({
+  status: sharedContextStatusSchema,
+});
+
 export type CreateSharedContextPublication = z.infer<typeof createSharedContextPublicationSchema>;
+export type UpdateSharedContextPublication = z.infer<typeof updateSharedContextPublicationSchema>;

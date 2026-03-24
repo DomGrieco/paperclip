@@ -2,6 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   agents,
@@ -376,6 +377,8 @@ describe("resolveRuntimeBundle", () => {
       assigneeAgentId: agent.id,
     }).returning();
 
+    const proposedFreshnessAt = new Date("2026-03-24T12:00:00.000Z");
+
     await db.insert(sharedContextPublications).values([
       {
         companyId: company.id,
@@ -413,6 +416,7 @@ describe("resolveRuntimeBundle", () => {
         visibility: "company",
         status: "proposed",
         freshness: "recent",
+        freshnessAt: proposedFreshnessAt,
       },
       {
         companyId: company.id,
@@ -463,5 +467,28 @@ describe("resolveRuntimeBundle", () => {
       ]),
     );
     expect(bundle.memory.snippets.some((snippet) => snippet.content.includes("Needs approval"))).toBe(false);
+
+    await db
+      .update(sharedContextPublications)
+      .set({ status: "published", updatedAt: new Date("2026-03-24T12:05:00.000Z") })
+      .where(eq(sharedContextPublications.title, "Needs approval"));
+
+    const bundleAfterApproval = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runId: null,
+      runtime: "hermes",
+    });
+
+    expect(bundleAfterApproval.memory.snippets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "shared_context.company",
+          content: expect.stringContaining("Needs approval"),
+          freshness: "recent",
+        }),
+      ]),
+    );
   }, 20_000);
 });

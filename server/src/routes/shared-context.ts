@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import {
   createSharedContextPublicationSchema,
+  updateSharedContextPublicationSchema,
   type SharedContextPublicationStatus,
   type SharedContextPublicationVisibility,
 } from "@paperclipai/shared";
@@ -56,6 +57,40 @@ export function sharedContextRoutes(db: Db) {
         },
       });
       res.status(201).json(publication);
+    },
+  );
+
+  router.patch(
+    "/companies/:companyId/shared-context/:publicationId",
+    validate(updateSharedContextPublicationSchema),
+    async (req, res) => {
+      const companyId = req.params.companyId as string;
+      const publicationId = req.params.publicationId as string;
+      assertCompanyAccess(req, companyId);
+
+      const publication = await svc.updateStatus(companyId, publicationId, req.body.status, {
+        type: req.actor.type === "agent" ? "agent" : "board",
+      });
+
+      const actor = getActorInfo(req);
+      await logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        action: publication.status === "published" ? "shared_context.published" : "shared_context.archived",
+        entityType: "shared_context_publication",
+        entityId: publication.id,
+        details: {
+          visibility: publication.visibility,
+          status: publication.status,
+          projectId: publication.projectId,
+          issueId: publication.issueId,
+          tagCount: publication.tags.length,
+        },
+      });
+      res.json(publication);
     },
   );
 

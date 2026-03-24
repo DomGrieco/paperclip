@@ -9,7 +9,7 @@ import type {
   SharedContextPublicationStatus,
   SharedContextPublicationVisibility,
 } from "@paperclipai/shared";
-import { unprocessable } from "../errors.js";
+import { forbidden, notFound, unprocessable } from "../errors.js";
 
 function mapPublication(row: typeof sharedContextPublications.$inferSelect): SharedContextPublication {
   return {
@@ -208,6 +208,63 @@ export function sharedContextService(db: Db) {
         )
         .limit(input.limit ?? 8);
       return rows.map(toRuntimeSnippet);
+    },
+
+    async updateStatus(
+      companyId: string,
+      publicationId: string,
+      status: SharedContextPublicationStatus,
+      actor: { type: "board" | "agent" },
+    ): Promise<SharedContextPublication> {
+      if (actor.type !== "board") {
+        throw forbidden("Only board actors can change shared-context governance state");
+      }
+
+      const existing = await db
+        .select()
+        .from(sharedContextPublications)
+        .where(
+          and(
+            eq(sharedContextPublications.companyId, companyId),
+            eq(sharedContextPublications.id, publicationId),
+          ),
+        )
+        .then((rows) => rows[0] ?? null);
+
+      if (!existing) {
+        throw notFound("Shared context publication not found");
+      }
+
+      const currentStatus = existing.status as SharedContextPublicationStatus;
+      if (currentStatus === status) {
+        return mapPublication(existing);
+      }
+
+      const allowedTransitions: Record<SharedContextPublicationStatus, SharedContextPublicationStatus[]> = {
+        proposed: ["published", "archived"],
+        published: ["archived"],
+        archived: [],
+      };
+
+      if (!allowedTransitions[currentStatus].some((candidate) => candidate === status)) {
+        throw unprocessable(`Cannot change shared context from ${currentStatus} to ${status}`);
+      }
+
+      const [row] = await db
+        .update(sharedContextPublications)
+        .set({
+          status,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(sharedContextPublications.companyId, companyId),
+            eq(sharedContextPublications.id, publicationId),
+          ),
+        )
+        .returning();
+
+      return mapPublication(row);
     },
   };
 }

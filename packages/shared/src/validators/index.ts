@@ -107,10 +107,12 @@ export {
 
 export {
   createSharedContextPublicationSchema,
+  updateSharedContextPublicationSchema,
   sharedContextVisibilitySchema,
   sharedContextStatusSchema,
   sharedContextFreshnessSchema,
   type CreateSharedContextPublication,
+  type UpdateSharedContextPublication,
 } from "./shared-context.js";
 
 export {
