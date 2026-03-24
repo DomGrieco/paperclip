@@ -2102,7 +2102,11 @@ export function heartbeatService(db: Db) {
 
       const runningAgent = await db
         .update(agents)
-        .set({ status: "running", updatedAt: new Date() })
+        .set({
+          status: "running",
+          lastHeartbeatAt: startedAt,
+          updatedAt: new Date(),
+        })
         .where(eq(agents.id, agent.id))
         .returning()
         .then((rows) => rows[0] ?? null);
@@ -2114,6 +2118,9 @@ export function heartbeatService(db: Db) {
           payload: {
             agentId: runningAgent.id,
             status: runningAgent.status,
+            lastHeartbeatAt: runningAgent.lastHeartbeatAt
+              ? new Date(runningAgent.lastHeartbeatAt).toISOString()
+              : null,
             outcome: "running",
           },
         });

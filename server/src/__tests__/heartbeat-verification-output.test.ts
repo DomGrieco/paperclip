@@ -121,6 +121,15 @@ async function waitForRunTerminalState(db: ReturnType<typeof createDb>, runId: s
   throw new Error("Timed out waiting for queued verification run to finish");
 }
 
+async function waitForAgentHeartbeatStart(db: ReturnType<typeof createDb>, agentId: string) {
+  for (let i = 0; i < 100; i += 1) {
+    const agent = await db.select().from(agents).where(eq(agents.id, agentId)).then((rows) => rows[0] ?? null);
+    if (agent && agent.status === "running" && agent.lastHeartbeatAt) return agent;
+    await delay(50);
+  }
+  throw new Error("Timed out waiting for agent heartbeat start state");
+}
+
 afterEach(async () => {
   adapterMocks.execute.mockReset();
   adapterMocks.getServerAdapter.mockClear();
@@ -140,6 +149,60 @@ afterEach(async () => {
 });
 
 describe("heartbeat verification output ingestion", () => {
+  it("updates lastHeartbeatAt as soon as a run starts", async () => {
+    let releaseExecution: (() => void) | null = null;
+    adapterMocks.execute.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseExecution = () => {
+            resolve({
+              exitCode: 0,
+              signal: null,
+              timedOut: false,
+            });
+          };
+        }),
+    );
+
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Verifier",
+      role: "qa",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+
+    const run = await heartbeat.wakeup(agent.id, {
+      source: "on_demand",
+      triggerDetail: "manual",
+      contextSnapshot: { source: "test" },
+    });
+
+    expect(run).not.toBeNull();
+    const runningAgent = await waitForAgentHeartbeatStart(db, agent.id);
+    const runningRun = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run!.id)).then((rows) => rows[0] ?? null);
+
+    expect(runningAgent.status).toBe("running");
+    expect(runningAgent.lastHeartbeatAt).not.toBeNull();
+    expect(runningRun?.startedAt).not.toBeNull();
+    expect(new Date(runningAgent.lastHeartbeatAt!).toISOString()).toBe(
+      new Date(runningRun!.startedAt!).toISOString(),
+    );
+
+    releaseExecution?.();
+    const finalized = await waitForRunTerminalState(db, run!.id);
+    expect(finalized.status).toBe("succeeded");
+  }, 20_000);
+
   it("persists adapter-reported verification verdicts and syncs the issue evidence bundle", async () => {
     adapterMocks.execute.mockResolvedValue({
       exitCode: 0,
