@@ -126,6 +126,7 @@ Supported bootstrap modes:
 - an operator may import selected data from an existing `~/.hermes`
 - imported data becomes Paperclip-managed company state
 - the host path is a bootstrap source only, not a permanent runtime dependency
+- once Paperclip materializes the managed company home, worker launch contracts should rely on that managed home rather than keeping the source mount in the steady-state runtime surface
 
 ## 5. Runtime Planes
 

@@ -8,6 +8,11 @@ import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
 const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const SHARED_HERMES_AUTH_FILES = ["auth.json", ".env", "config.yaml"] as const;
+const INLINE_HERMES_BOOTSTRAP_ENV_NAMES = {
+  authJson: "PAPERCLIP_HERMES_AUTH_JSON",
+  envFile: "PAPERCLIP_HERMES_ENV",
+  configYaml: "PAPERCLIP_HERMES_CONFIG_YAML",
+} as const;
 const SHARED_CONTEXT_FILE = "shared-context.json";
 const PAPERCLIP_RUNTIME_ROOT = path.join(".paperclip", "runtime");
 const PAPERCLIP_API_HELPER_FILE = "paperclip-api";
@@ -18,6 +23,12 @@ type HermesAuthStore = {
   active_provider?: string;
   provider?: string;
   providers?: Record<string, unknown>;
+};
+
+type InlineHermesBootstrapPayload = {
+  authJson: string | null;
+  envFile: string | null;
+  configYaml: string | null;
 };
 
 const DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE = `You are "{{agentName}}", a Hermes worker in a Paperclip-managed company.
@@ -231,6 +242,24 @@ async function readHermesAuthStore(sharedSource: string): Promise<HermesAuthStor
   }
 }
 
+function resolveInlineHermesBootstrapPayload(env: Record<string, string>): InlineHermesBootstrapPayload {
+  return {
+    authJson: readString(env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.authJson]),
+    envFile: readString(env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.envFile]),
+    configYaml: readString(env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.configYaml]),
+  };
+}
+
+function hasInlineHermesBootstrapPayload(payload: InlineHermesBootstrapPayload): boolean {
+  return Boolean(payload.authJson || payload.envFile || payload.configYaml);
+}
+
+function clearInlineHermesBootstrapEnv(env: Record<string, string>): void {
+  delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.authJson];
+  delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.envFile];
+  delete env[INLINE_HERMES_BOOTSTRAP_ENV_NAMES.configYaml];
+}
+
 function sanitizeSharedHermesEnvFile(content: string): string {
   return content
     .split(/\r?\n/)
@@ -270,22 +299,47 @@ function sanitizeSharedHermesConfigYaml(content: string): string {
   return sanitized.join("\n").replace(/\n*$/, "\n");
 }
 
+function sanitizeHermesBootstrapFile(input: {
+  relativeName: (typeof SHARED_HERMES_AUTH_FILES)[number];
+  content: string;
+}): string {
+  if (input.relativeName === "auth.json") {
+    return input.content.replace(/\n*$/, "\n");
+  }
+  return input.relativeName === ".env"
+    ? sanitizeSharedHermesEnvFile(input.content)
+    : sanitizeSharedHermesConfigYaml(input.content);
+}
+
 async function copySanitizedSharedHermesFile(input: {
   source: string;
   destination: string;
   relativeName: (typeof SHARED_HERMES_AUTH_FILES)[number];
 }): Promise<void> {
-  if (input.relativeName === "auth.json") {
-    await fs.copyFile(input.source, input.destination);
-    return;
-  }
-
   const raw = await fs.readFile(input.source, "utf8");
-  const sanitized =
-    input.relativeName === ".env"
-      ? sanitizeSharedHermesEnvFile(raw)
-      : sanitizeSharedHermesConfigYaml(raw);
-  await fs.writeFile(input.destination, sanitized, "utf8");
+  await fs.writeFile(input.destination, sanitizeHermesBootstrapFile({
+    relativeName: input.relativeName,
+    content: raw,
+  }), "utf8");
+}
+
+async function materializeInlineHermesBootstrapProfile(input: {
+  workerHome: string;
+  payload: InlineHermesBootstrapPayload;
+}): Promise<void> {
+  await fs.mkdir(input.workerHome, { recursive: true });
+  const entries: Array<[(typeof SHARED_HERMES_AUTH_FILES)[number], string | null]> = [
+    ["auth.json", input.payload.authJson],
+    [".env", input.payload.envFile],
+    ["config.yaml", input.payload.configYaml],
+  ];
+
+  for (const [relativeName, content] of entries) {
+    if (!content) continue;
+    const destination = path.join(input.workerHome, relativeName);
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    await fs.writeFile(destination, sanitizeHermesBootstrapFile({ relativeName, content }), "utf8");
+  }
 }
 
 async function syncSharedHermesAuthProfile(input: {
@@ -329,9 +383,16 @@ export async function prepareHermesAdapterConfigForExecution(input: {
     readString(input.managedHome) ??
     (readString(input.companyId) ? resolveCompanyHermesHomeDir(readString(input.companyId)!) : null) ??
     path.join(input.cwd, ".paperclip", "hermes-home");
+  const inlineBootstrap = resolveInlineHermesBootstrapPayload(env);
   const sharedSource =
     readString(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
-  await syncSharedHermesAuthProfile({ workerHome: managedHome, sharedSource });
+  if (hasInlineHermesBootstrapPayload(inlineBootstrap)) {
+    await materializeInlineHermesBootstrapProfile({ workerHome: managedHome, payload: inlineBootstrap });
+  } else {
+    await syncSharedHermesAuthProfile({ workerHome: managedHome, sharedSource });
+  }
+  clearInlineHermesBootstrapEnv(env);
+  delete env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE;
   const authStore = (await readHermesAuthStore(managedHome)) ?? (managedHome !== sharedSource ? await readHermesAuthStore(sharedSource) : null);
   env.HERMES_HOME = managedHome;
   env.TERMINAL_CWD = input.cwd;

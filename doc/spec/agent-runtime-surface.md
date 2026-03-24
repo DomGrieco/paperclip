@@ -152,6 +152,7 @@ Default rule:
 
 - static runtime context goes into the bundle
 - sensitive values go through env injection, runner-side mounts, or other scoped delivery
+- bootstrap/import sources should be consumed during runtime preparation and omitted from the steady-state worker contract once equivalent managed state has been materialized
 
 This keeps workspaces useful to coding agents without turning them into uncontrolled secret dumps.
 

@@ -75,7 +75,7 @@ function buildRuntimeBundle(): RuntimeBundle {
 }
 
 describe("buildHermesContainerLaunchPlan", () => {
-  it("derives a hermes container launch contract from resolved execution config", () => {
+  it("derives a hermes container launch contract from resolved execution config after runtime prep materializes the managed home", () => {
     const plan = buildHermesContainerLaunchPlan({
       runId: "run-1",
       agentId: "agent-1",
@@ -92,7 +92,6 @@ describe("buildHermesContainerLaunchPlan", () => {
           PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/instructions.md",
           PAPERCLIP_API_HELPER_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/paperclip-api",
           PAPERCLIP_SHARED_CONTEXT_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/context/shared-context.json",
-          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: "/paperclip/shared/hermes-home-source",
           PAPERCLIP_API_KEY: "secret-token",
         },
       },
@@ -112,7 +111,7 @@ describe("buildHermesContainerLaunchPlan", () => {
     expect(plan.workingDir).toBe("/workspace");
     expect(plan.workspacePath).toBe("/workspace");
     expect(plan.agentHomePath).toBe("/home/hermes/.hermes");
-    expect(plan.sharedAuthSourcePath).toBe("/paperclip/shared/hermes-home-source");
+    expect(plan.sharedAuthSourcePath).toBeNull();
     expect(plan.runtimeBundleRoot).toBe("/workspace/.paperclip/runtime");
     expect(plan.sharedContextPath).toBe("/workspace/.paperclip/context/shared-context.json");
     expect(plan.provider).toBe("openai-codex");
@@ -133,11 +132,6 @@ describe("buildHermesContainerLaunchPlan", () => {
         expect.objectContaining({
           kind: "runtime_bundle",
           containerPath: "/workspace/.paperclip/runtime",
-          readOnly: true,
-        }),
-        expect.objectContaining({
-          kind: "shared_auth",
-          containerPath: "/paperclip/shared/hermes-home-source",
           readOnly: true,
         }),
       ]),
@@ -188,6 +182,42 @@ describe("buildHermesContainerLaunchPlan", () => {
       scopeId: "run-1",
       ownerAgentId: "agent-1",
     });
+  });
+
+  it("preserves an explicit shared-auth import mount when runtime prep requests one", () => {
+    const plan = buildHermesContainerLaunchPlan({
+      runId: "run-import",
+      agentId: "agent-import",
+      executionWorkspaceCwd: "/tmp/paperclip/workspaces/import-helper",
+      runtimeBundle: buildRuntimeBundle(),
+      executionConfig: {
+        env: {
+          HERMES_HOME: "/tmp/paperclip/workspaces/import-helper/.paperclip/hermes-home",
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: "/paperclip/shared/hermes-home-source",
+        },
+      },
+    });
+
+    expect(plan.sharedAuthSourcePath).toBe("/paperclip/shared/hermes-home-source");
+    expect(plan.mounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "shared_auth",
+          hostPath: "/paperclip/shared/hermes-home-source",
+          containerPath: "/paperclip/shared/hermes-home-source",
+          readOnly: true,
+        }),
+      ]),
+    );
+    expect(plan.env).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "PAPERCLIP_HERMES_SHARED_HOME_SOURCE",
+          value: "/paperclip/shared/hermes-home-source",
+          source: "shared_auth",
+        }),
+      ]),
+    );
   });
 
   it("falls back cleanly when runtime bundle materialization is absent", () => {

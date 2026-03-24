@@ -133,6 +133,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"version\":\"v1\"");
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
     expect(env.HERMES_HOME).toContain(path.join("company-hermes-home"));
+    expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
 
     const bundleJson = await fs.readFile(env.PAPERCLIP_RUNTIME_BUNDLE_PATH, "utf8");
     expect(bundleJson).toContain('"runtime": "hermes"');
@@ -188,6 +189,52 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(String(nextConfig.promptTemplate)).toContain("finish decisively");
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.3-codex");
+  });
+
+  it("materializes inline managed bootstrap payloads without leaking bootstrap env hints", async () => {
+    const cwd = await makeTempDir();
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        model: "anthropic/claude-sonnet-4",
+        env: {
+          PAPERCLIP_HERMES_AUTH_JSON: JSON.stringify({ active_provider: "openai-codex" }),
+          PAPERCLIP_HERMES_ENV: ["OPENAI_API_KEY=inline-key", "TERMINAL_CWD=/tmp/host-cwd", ""].join("\n"),
+          PAPERCLIP_HERMES_CONFIG_YAML: [
+            "model: gpt-5.3-codex",
+            "terminal:",
+            "  cwd: /tmp/host-cwd",
+            "  timeout: 120",
+            "",
+          ].join("\n"),
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle(),
+      authToken: null,
+    });
+
+    const env = nextConfig.env as Record<string, string | undefined>;
+    expect(env.PAPERCLIP_HERMES_AUTH_JSON).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_ENV).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_CONFIG_YAML).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
+    expect(nextConfig.provider).toBe("openai-codex");
+    expect(nextConfig.model).toBe("gpt-5.3-codex");
+
+    const hermesHome = String(env.HERMES_HOME);
+    const copiedAuth = await fs.readFile(path.join(hermesHome, "auth.json"), "utf8");
+    const copiedEnv = await fs.readFile(path.join(hermesHome, ".env"), "utf8");
+    const copiedConfig = await fs.readFile(path.join(hermesHome, "config.yaml"), "utf8");
+
+    expect(copiedAuth).toContain("openai-codex");
+    expect(copiedAuth.endsWith("\n")).toBe(true);
+    expect(copiedEnv).toContain("OPENAI_API_KEY=inline-key");
+    expect(copiedEnv).not.toContain("TERMINAL_CWD=/tmp/host-cwd");
+    expect(copiedConfig).toContain("terminal:");
+    expect(copiedConfig).toContain("timeout: 120");
+    expect(copiedConfig).not.toContain("cwd: /tmp/host-cwd");
   });
 
   it("prepends the runtime note to an existing custom prompt template without overwriting explicit credentials", async () => {

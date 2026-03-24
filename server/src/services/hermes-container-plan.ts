@@ -3,7 +3,6 @@ import type { HermesContainerEnvPlan, HermesContainerLaunchPlan, RuntimeBundle, 
 import { parseObject } from "../adapters/utils.js";
 
 const DEFAULT_HERMES_CONTAINER_IMAGE = "paperclip/hermes-worker:dev";
-const DEFAULT_SHARED_HERMES_HOME_SOURCE = "/paperclip/shared/hermes-home-source";
 const CONTAINER_WORKSPACE_ROOT = "/workspace";
 const CONTAINER_AGENT_HOME_ROOT = "/home/hermes/.hermes";
 const CONTAINER_RUNTIME_ROOT = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "runtime");
@@ -71,8 +70,7 @@ export function buildHermesContainerLaunchPlan(input: {
   const envRecord = parseObject(input.executionConfig.env);
   const workspaceHostPath = input.executionWorkspaceCwd;
   const agentHomeHostPath = readString(envRecord.HERMES_HOME) ?? path.join(workspaceHostPath, ".paperclip", "hermes-home");
-  const sharedAuthSourceHostPath =
-    readString(envRecord.PAPERCLIP_HERMES_SHARED_HOME_SOURCE) ?? DEFAULT_SHARED_HERMES_HOME_SOURCE;
+  const sharedAuthSourceHostPath = readString(envRecord.PAPERCLIP_HERMES_SHARED_HOME_SOURCE);
   const runtimeBundleHostRoot = readString(envRecord.PAPERCLIP_RUNTIME_ROOT);
   const sharedContextHostPath = readString(envRecord.PAPERCLIP_SHARED_CONTEXT_PATH);
   const image =
