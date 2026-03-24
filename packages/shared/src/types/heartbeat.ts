@@ -10,6 +10,7 @@ import type {
   WakeupRequestStatus,
 } from "../constants.js";
 import type {
+  HermesContainerLaunchPlan,
   OrchestrationArtifactBundle,
   OrchestrationPolicySnapshot,
   PaperclipSharedContextPacket,
@@ -20,6 +21,7 @@ import type {
 export interface HeartbeatContextSnapshot extends Record<string, unknown> {
   paperclipRuntimeBundle?: RuntimeBundle | null;
   paperclipSharedContextPacket?: PaperclipSharedContextPacket | null;
+  paperclipHermesContainerPlan?: HermesContainerLaunchPlan | null;
 }
 
 export interface HeartbeatRun {

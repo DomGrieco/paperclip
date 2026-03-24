@@ -61,6 +61,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { AgentIcon, AgentIconPicker } from "../components/AgentIconPicker";
 import { RunTranscriptView, type TranscriptMode } from "../components/transcript/RunTranscriptView";
+import { RunRuntimeContractCard } from "../components/RunRuntimeContractCard";
 import {
   isUuidLike,
   type Agent,
@@ -2034,6 +2035,8 @@ function RunDetail({ run: initialRun, agentRouteId, adapterType }: { run: Heartb
           <pre className="bg-neutral-100 dark:bg-neutral-950 rounded-md p-3 text-xs font-mono text-foreground overflow-x-auto whitespace-pre-wrap">{run.stdoutExcerpt}</pre>
         </div>
       )}
+
+      <RunRuntimeContractCard run={run} />
 
       {/* Log viewer */}
       <LogViewer run={run} adapterType={adapterType} />
