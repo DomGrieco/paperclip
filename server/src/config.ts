@@ -164,20 +164,22 @@ export function loadConfig(): Config {
       .map((value) => value.trim().toLowerCase())
       .filter((value) => value.length > 0)
     : null;
-  const publicUrlHostname = authPublicBaseUrl
-    ? (() => {
-      try {
-        return new URL(authPublicBaseUrl).hostname.trim().toLowerCase();
-      } catch {
-        return null;
-      }
-    })()
-    : null;
+  const parseHostname = (rawUrl: string | undefined | null): string | null => {
+    if (!rawUrl) return null;
+    try {
+      return new URL(rawUrl).hostname.trim().toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const publicUrlHostname = parseHostname(authPublicBaseUrl);
+  const hermesContainerApiHostname = parseHostname(process.env.PAPERCLIP_HERMES_CONTAINER_API_URL);
   const allowedHostnames = Array.from(
     new Set(
       [
         ...(allowedHostnamesFromEnv ?? fileConfig?.server.allowedHostnames ?? []),
         ...(publicUrlHostname ? [publicUrlHostname] : []),
+        ...(hermesContainerApiHostname ? [hermesContainerApiHostname] : []),
       ]
         .map((value) => value.trim().toLowerCase())
         .filter(Boolean),
