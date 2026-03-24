@@ -544,6 +544,19 @@ describe("resolveRuntimeBundle", () => {
           budgetCents: 25,
           maxRuntimeSec: 900,
         },
+        {
+          id: "verify-heartbeat-ui",
+          kind: "verification",
+          title: "Verify heartbeat UI labels",
+          goal: "Verify the updated timeline labels in a browser check.",
+          taskKey: "verify-heartbeat-ui",
+          expectedArtifacts: [{ kind: "test_result", required: true }],
+          acceptanceChecks: ["Browser validation confirms distinct request/start labels."],
+          recommendedModelTier: "premium",
+          budgetCents: 20,
+          maxRuntimeSec: 600,
+          dependsOn: ["worker-heartbeat-ui"],
+        },
       ],
     });
     const [worker] = await graph.spawnWorkers(planner.id, [
@@ -574,19 +587,22 @@ describe("resolveRuntimeBundle", () => {
       runtime: "codex",
     });
 
-    expect(bundle.swarm.plan).toEqual(
-      expect.objectContaining({
-        version: "v1",
-        plannerRunId: planner.id,
-        subtasks: [
-          expect.objectContaining({
-            id: "worker-heartbeat-ui",
-            taskKey: "heartbeat-ui",
-            recommendedModelTier: "balanced",
-          }),
-        ],
-      }),
-    );
+    expect(bundle.swarm.plan).toMatchObject({
+      version: "v1",
+      plannerRunId: planner.id,
+      subtasks: [
+        {
+          id: "worker-heartbeat-ui",
+          taskKey: "heartbeat-ui",
+          recommendedModelTier: "balanced",
+        },
+        {
+          id: "verify-heartbeat-ui",
+          taskKey: "verify-heartbeat-ui",
+          recommendedModelTier: "premium",
+        },
+      ],
+    });
     expect(bundle.swarm.currentSubtask).toEqual(
       expect.objectContaining({
         id: "worker-heartbeat-ui",

@@ -186,6 +186,12 @@ describe("run graph schema contract", () => {
     expect(root.runType).toBe("planner");
     expect(root.status).toBe("queued");
     expect(root.parentRunId).toBeNull();
+    expect(root.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmModelTier: "premium",
+      }),
+    );
     expect(children).toHaveLength(2);
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
   }, 20_000);
@@ -231,6 +237,16 @@ describe("run graph schema contract", () => {
           acceptanceChecks: ["Summary cites the failing log path."],
           recommendedModelTier: "cheap",
         },
+        {
+          id: "subtask-2",
+          kind: "review",
+          title: "Review findings",
+          goal: "Review the gathered findings for completeness.",
+          taskKey: "review-findings",
+          expectedArtifacts: [{ kind: "comment", required: true }],
+          acceptanceChecks: ["Review covers both evidence sources."],
+          recommendedModelTier: "premium",
+        },
       ],
     });
     const [worker] = await graph.spawnWorkers(planner.id, [
@@ -255,18 +271,40 @@ describe("run graph schema contract", () => {
           version: "v1",
           plannerRunId: planner.id,
         }),
+        swarmAdmission: expect.objectContaining({
+          admitted: true,
+          subtaskCount: 2,
+        }),
+      }),
+    );
+    expect(plannerWithPlan.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmAdmission: expect.objectContaining({
+          admitted: true,
+          subtaskCount: 2,
+        }),
       }),
     );
     expect(worker.contextSnapshot).toEqual(
       expect.objectContaining({
         issueId: issue.id,
         taskKey: "inspect-logs",
+        swarmModelTier: "cheap",
         swarmSubtaskId: "subtask-1",
         swarmPlanVersion: "v1",
         swarmSubtask: expect.objectContaining({
           id: "subtask-1",
           recommendedModelTier: "cheap",
         }),
+      }),
+    );
+    expect(worker.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmModelTier: "cheap",
+        swarmSubtaskId: "subtask-1",
+        swarmSubtaskKind: "research",
       }),
     );
   }, 20_000);

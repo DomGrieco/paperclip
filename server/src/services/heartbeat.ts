@@ -44,6 +44,7 @@ import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
+import { resolveSwarmAdapterConfigOverride } from "./swarm-policy.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
 import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
@@ -1791,6 +1792,10 @@ export function heartbeatService(db: Db) {
       sessionCodec.deserialize(taskSessionForRun?.sessionParamsJson ?? null),
     );
     const config = parseObject(agent.adapterConfig);
+    const swarmModelTier =
+      typeof context.swarmModelTier === "string" && context.swarmModelTier.trim().length > 0
+        ? context.swarmModelTier.trim()
+        : null;
     const executionWorkspaceMode = resolveExecutionWorkspaceMode({
       projectPolicy: projectExecutionWorkspacePolicy,
       issueSettings: issueExecutionWorkspaceSettings,
@@ -1812,9 +1817,15 @@ export function heartbeatService(db: Db) {
     const mergedConfig = issueAssigneeOverrides?.adapterConfig
       ? { ...workspaceManagedConfig, ...issueAssigneeOverrides.adapterConfig }
       : workspaceManagedConfig;
+    const swarmAdapterConfigOverride = swarmModelTier
+      ? resolveSwarmAdapterConfigOverride(agent.adapterType, swarmModelTier as "cheap" | "balanced" | "premium")
+      : null;
+    const executionConfigInput = swarmAdapterConfigOverride
+      ? { ...mergedConfig, ...swarmAdapterConfigOverride }
+      : mergedConfig;
     const { config: resolvedConfig, secretKeys } = await secretsSvc.resolveAdapterConfigForRuntime(
       agent.companyId,
-      mergedConfig,
+      executionConfigInput,
     );
     const issueRef = issueContext
       ? {
@@ -3113,6 +3124,7 @@ export function heartbeatService(db: Db) {
             wakeupRequestId: wakeupRequest.id,
             contextSnapshot: enrichedContextSnapshot,
             sessionIdBefore: sessionBefore,
+            policySnapshotJson: plannerGraph?.root.policySnapshotJson ?? null,
             runType: plannerGraph?.runType ?? "worker",
             rootRunId: plannerGraph?.rootRunId ?? null,
             parentRunId: plannerGraph?.parentRunId ?? null,
@@ -3250,6 +3262,7 @@ export function heartbeatService(db: Db) {
         wakeupRequestId: wakeupRequest.id,
         contextSnapshot: enrichedContextSnapshot,
         sessionIdBefore: sessionBefore,
+        policySnapshotJson: plannerGraph?.root.policySnapshotJson ?? null,
         runType: plannerGraph?.runType ?? "worker",
         rootRunId: plannerGraph?.rootRunId ?? null,
         parentRunId: plannerGraph?.parentRunId ?? null,

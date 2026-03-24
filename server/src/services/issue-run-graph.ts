@@ -6,6 +6,8 @@ import {
   swarmSubtaskSchema,
 } from "@paperclipai/shared";
 import type {
+  EvidencePolicy,
+  EvidencePolicySource,
   HeartbeatRunStatus,
   HeartbeatRunType,
   HeartbeatRun,
@@ -17,6 +19,7 @@ import type {
 } from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
+import { buildSwarmPolicySnapshot, resolveSwarmModelTier, shouldSwarm } from "./swarm-policy.js";
 
 const MAX_WORKER_CHILDREN = 16;
 const DEFAULT_MAX_REPAIR_ATTEMPTS = 3;
@@ -80,6 +83,8 @@ export function issueRunGraphService(db: Db) {
         id: issues.id,
         companyId: issues.companyId,
         assigneeAgentId: issues.assigneeAgentId,
+        evidencePolicy: issues.evidencePolicy,
+        evidencePolicySource: issues.evidencePolicySource,
       })
       .from(issues)
       .where(eq(issues.id, issueId))
@@ -130,10 +135,16 @@ export function issueRunGraphService(db: Db) {
         parentRunId: null,
         graphDepth: 0,
         repairAttempt: 0,
+        policySnapshotJson: buildSwarmPolicySnapshot({
+          evidencePolicy: issue.evidencePolicy as EvidencePolicy,
+          evidencePolicySource: issue.evidencePolicySource as EvidencePolicySource,
+          tier: "premium",
+        }),
         contextSnapshot: {
           issueId: issue.id,
           source: "issue.run_graph",
           role: "planner_root",
+          swarmModelTier: "premium",
         },
       })
       .returning();
@@ -159,6 +170,10 @@ export function issueRunGraphService(db: Db) {
       ...swarmPlan,
       plannerRunId: swarmPlan.plannerRunId ?? root.id,
     });
+    const admission = shouldSwarm({
+      plan: normalizedPlan,
+      maxChildren: MAX_WORKER_CHILDREN,
+    });
 
     const [updated] = await db
       .update(heartbeatRuns)
@@ -166,6 +181,13 @@ export function issueRunGraphService(db: Db) {
         contextSnapshot: {
           ...(root.contextSnapshot ?? {}),
           swarmPlan: normalizedPlan,
+          swarmAdmission: admission,
+        },
+        policySnapshotJson: {
+          ...((root.policySnapshotJson ?? {}) as OrchestrationPolicySnapshot),
+          swarmAdmission: admission,
+          swarmEnabled: admission.admitted,
+          swarmPlannerRunId: normalizedPlan.plannerRunId ?? root.id,
         },
         updatedAt: new Date(),
       })
@@ -193,6 +215,14 @@ export function issueRunGraphService(db: Db) {
 
     const issueId = readIssueId(root.contextSnapshot);
     const swarmPlan = readSwarmPlan(root.contextSnapshot);
+    const issue = issueId ? await getIssue(issueId) : null;
+    const swarmAdmission = shouldSwarm({
+      plan: swarmPlan,
+      maxChildren: MAX_WORKER_CHILDREN,
+    });
+    if (swarmPlan && !swarmAdmission.admitted) {
+      throw conflict("Worker fan-out blocked by swarm admission policy", swarmAdmission);
+    }
     const existingChildren = await db
       .select({ count: sql<number>`count(*)` })
       .from(heartbeatRuns)
@@ -212,6 +242,7 @@ export function issueRunGraphService(db: Db) {
       .values(
         workers.map((worker) => {
           const normalizedSubtask = worker.subtask ? swarmSubtaskSchema.parse(worker.subtask) : null;
+          const swarmModelTier = normalizedSubtask ? resolveSwarmModelTier(normalizedSubtask) : "balanced";
           return {
             companyId: root.companyId,
             agentId: worker.agentId ?? root.agentId,
@@ -223,10 +254,19 @@ export function issueRunGraphService(db: Db) {
             parentRunId: root.id,
             graphDepth: (root.graphDepth ?? 0) + 1,
             repairAttempt: 0,
+            policySnapshotJson: buildSwarmPolicySnapshot({
+              evidencePolicy: (issue?.evidencePolicy ?? "code_ci_evaluator_summary") as EvidencePolicy,
+              evidencePolicySource: (issue?.evidencePolicySource ?? "company_default") as EvidencePolicySource,
+              tier: swarmModelTier,
+              plannerRunId: swarmPlan?.plannerRunId ?? root.id,
+              subtask: normalizedSubtask,
+              admission: swarmAdmission,
+            }),
             contextSnapshot: {
               issueId,
               ...(worker.contextSnapshot ?? {}),
               ...(worker.taskKey ? { taskKey: worker.taskKey } : {}),
+              swarmModelTier,
               ...(normalizedSubtask ? { swarmSubtask: normalizedSubtask } : {}),
               ...(normalizedSubtask?.id ? { swarmSubtaskId: normalizedSubtask.id } : {}),
               ...(swarmPlan ? { swarmPlanVersion: swarmPlan.version } : {}),
