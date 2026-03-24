@@ -3,7 +3,7 @@ import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import type { HermesBootstrapImportSummary, RuntimeBundle } from "@paperclipai/shared";
 import { resolveCompanyHermesHomeDir } from "../home-paths.js";
-import { importHermesBootstrapFromHome } from "./hermes-bootstrap.js";
+import { importHermesBootstrapFromHome, type ImportedHermesBootstrap } from "./hermes-bootstrap.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
@@ -383,6 +383,7 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   managedHome?: string | null;
   runtimeBundle: RuntimeBundle | null;
   authToken?: string | null;
+  persistedBootstrap?: ImportedHermesBootstrap | null;
 }): Promise<Record<string, unknown>> {
   const nextConfig: Record<string, unknown> = { ...input.config };
   const env = {
@@ -414,6 +415,12 @@ export async function prepareHermesAdapterConfigForExecution(input: {
     await materializeInlineHermesBootstrapProfile({
       workerHome: managedHome,
       payload: importedBootstrap.payload,
+    });
+  } else if (input.persistedBootstrap) {
+    importedBootstrapSummary = input.persistedBootstrap.summary;
+    await materializeInlineHermesBootstrapProfile({
+      workerHome: managedHome,
+      payload: input.persistedBootstrap.payload,
     });
   } else {
     await syncSharedHermesAuthProfile({ workerHome: managedHome, sharedSource });

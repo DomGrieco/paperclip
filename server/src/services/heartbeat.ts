@@ -45,6 +45,7 @@ import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
+import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
@@ -2013,6 +2014,7 @@ export function heartbeatService(db: Db) {
             managedHome: readNonEmptyString(parseObject(context.paperclipWorkspace).hermesHome) ?? null,
             runtimeBundle,
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
+            persistedBootstrap: await hermesBootstrapProfileService(db).getStoredProfile(agent.companyId),
           })
         : resolvedConfig;
     const hermesContainerPlan = agent.adapterType === "hermes_local"

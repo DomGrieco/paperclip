@@ -119,6 +119,49 @@ function parseAuthSummary(content: string): Pick<HermesBootstrapImportSummary, "
   }
 }
 
+export function classifyHermesBootstrap(input: {
+  sourceHomePath: string;
+  authJson: string | null;
+  envFile: string | null;
+  configYaml: string | null;
+}): ImportedHermesBootstrap {
+  const authSummary = input.authJson ? parseAuthSummary(input.authJson) : { activeProvider: null, authProviderIds: [] };
+  const secretEnvKeys = input.envFile ? parseEnvKeyNames(input.envFile) : [];
+  const configuredProvider = input.configYaml ? readYamlChildScalar(input.configYaml, "model", "provider") : null;
+  const defaultModel = input.configYaml ? readYamlChildScalar(input.configYaml, "model", "default") : null;
+  const configuredBaseUrl = input.configYaml ? readYamlChildScalar(input.configYaml, "model", "base_url") : null;
+  const terminalBackend = input.configYaml ? readYamlChildScalar(input.configYaml, "terminal", "backend") : null;
+  const terminalCwd = input.configYaml ? readYamlChildScalar(input.configYaml, "terminal", "cwd") : null;
+  const mcpServerNames = input.configYaml ? readYamlChildKeys(input.configYaml, "mcp_servers") : [];
+  const enabledPlatforms = input.configYaml ? readYamlChildKeys(input.configYaml, "platform_toolsets") : [];
+  const enabledToolsets = input.configYaml ? readYamlList(input.configYaml, "toolsets") : [];
+
+  return {
+    summary: {
+      sourceHomePath: path.resolve(input.sourceHomePath),
+      hasAuthJson: Boolean(input.authJson),
+      hasConfigYaml: Boolean(input.configYaml),
+      hasEnvFile: Boolean(input.envFile),
+      activeProvider: authSummary.activeProvider,
+      authProviderIds: authSummary.authProviderIds,
+      configuredProvider,
+      defaultModel,
+      configuredBaseUrl,
+      terminalBackend,
+      terminalCwd,
+      mcpServerNames,
+      enabledPlatforms,
+      enabledToolsets,
+      secretEnvKeys,
+    },
+    payload: {
+      authJson: input.authJson ? input.authJson.replace(/\n*$/, "\n") : null,
+      envFile: input.envFile ? input.envFile.replace(/\n*$/, "\n") : null,
+      configYaml: input.configYaml ? input.configYaml.replace(/\n*$/, "\n") : null,
+    },
+  };
+}
+
 export async function importHermesBootstrapFromHome(input: {
   homePath: string;
 }): Promise<ImportedHermesBootstrap> {
@@ -139,39 +182,10 @@ export async function importHermesBootstrapFromHome(input: {
     hasConfigYaml ? fs.readFile(configPath, "utf8") : Promise.resolve(null),
   ]);
 
-  const authSummary = authJson ? parseAuthSummary(authJson) : { activeProvider: null, authProviderIds: [] };
-  const secretEnvKeys = envFile ? parseEnvKeyNames(envFile) : [];
-  const configuredProvider = configYaml ? readYamlChildScalar(configYaml, "model", "provider") : null;
-  const defaultModel = configYaml ? readYamlChildScalar(configYaml, "model", "default") : null;
-  const configuredBaseUrl = configYaml ? readYamlChildScalar(configYaml, "model", "base_url") : null;
-  const terminalBackend = configYaml ? readYamlChildScalar(configYaml, "terminal", "backend") : null;
-  const terminalCwd = configYaml ? readYamlChildScalar(configYaml, "terminal", "cwd") : null;
-  const mcpServerNames = configYaml ? readYamlChildKeys(configYaml, "mcp_servers") : [];
-  const enabledPlatforms = configYaml ? readYamlChildKeys(configYaml, "platform_toolsets") : [];
-  const enabledToolsets = configYaml ? readYamlList(configYaml, "toolsets") : [];
-
-  return {
-    summary: {
-      sourceHomePath,
-      hasAuthJson,
-      hasConfigYaml,
-      hasEnvFile,
-      activeProvider: authSummary.activeProvider,
-      authProviderIds: authSummary.authProviderIds,
-      configuredProvider,
-      defaultModel,
-      configuredBaseUrl,
-      terminalBackend,
-      terminalCwd,
-      mcpServerNames,
-      enabledPlatforms,
-      enabledToolsets,
-      secretEnvKeys,
-    },
-    payload: {
-      authJson: authJson ? authJson.replace(/\n*$/, "\n") : null,
-      envFile: envFile ? envFile.replace(/\n*$/, "\n") : null,
-      configYaml: configYaml ? configYaml.replace(/\n*$/, "\n") : null,
-    },
-  };
+  return classifyHermesBootstrap({
+    sourceHomePath,
+    authJson,
+    envFile,
+    configYaml,
+  });
 }
