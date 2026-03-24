@@ -376,6 +376,15 @@ async function syncSharedHermesAuthProfile(input: {
   }
 }
 
+async function clearStalePaperclipRuntimeArtifacts(cwd: string): Promise<void> {
+  const runtimeRoot = path.join(cwd, PAPERCLIP_RUNTIME_ROOT);
+  const sharedContextRoot = path.join(cwd, ".paperclip", "context");
+  await Promise.all([
+    fs.rm(runtimeRoot, { recursive: true, force: true }),
+    fs.rm(path.join(sharedContextRoot, SHARED_CONTEXT_FILE), { force: true }),
+  ]);
+}
+
 export async function prepareHermesAdapterConfigForExecution(input: {
   config: Record<string, unknown>;
   cwd: string;
@@ -452,6 +461,10 @@ export async function prepareHermesAdapterConfigForExecution(input: {
         nextConfig.model = defaultModel;
       }
     }
+  }
+
+  if (!input.runtimeBundle) {
+    await clearStalePaperclipRuntimeArtifacts(input.cwd);
   }
 
   const helperRuntimeRoot = path.join(input.cwd, PAPERCLIP_RUNTIME_ROOT);

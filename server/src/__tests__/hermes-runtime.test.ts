@@ -406,4 +406,36 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(promptTemplate).toContain("{{#noTask}}");
     expect(promptTemplate).toContain("Check your assigned todo issues");
   });
+
+  it("clears stale runtime bundle artifacts when a heartbeat run has no runtime bundle", async () => {
+    const cwd = await makeTempDir();
+    const runtimeRoot = path.join(cwd, ".paperclip", "runtime");
+    const sharedContextPath = path.join(cwd, ".paperclip", "context", "shared-context.json");
+    await fs.mkdir(runtimeRoot, { recursive: true });
+    await fs.mkdir(path.dirname(sharedContextPath), { recursive: true });
+    await fs.writeFile(path.join(runtimeRoot, "bundle.json"), '{"stale":true}\n', "utf8");
+    await fs.writeFile(path.join(runtimeRoot, "instructions.md"), 'stale instructions\n', "utf8");
+    await fs.writeFile(sharedContextPath, '{"stale":true}\n', "utf8");
+
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        env: {},
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: null,
+      authToken: null,
+    });
+
+    const env = nextConfig.env as Record<string, string | undefined>;
+    expect(env.PAPERCLIP_RUNTIME_ROOT).toBeUndefined();
+    expect(env.PAPERCLIP_RUNTIME_BUNDLE_PATH).toBeUndefined();
+    expect(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH).toBeUndefined();
+    expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toBeUndefined();
+    expect(await fs.readFile(env.PAPERCLIP_API_HELPER_PATH as string, "utf8")).toContain("urllib.request");
+    await expect(fs.access(path.join(runtimeRoot, "bundle.json"))).rejects.toThrow();
+    await expect(fs.access(path.join(runtimeRoot, "instructions.md"))).rejects.toThrow();
+    await expect(fs.access(sharedContextPath)).rejects.toThrow();
+  });
 });

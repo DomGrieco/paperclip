@@ -175,6 +175,19 @@ export type DockerContainerMount = {
   RW?: boolean;
 };
 
+type InspectedContainerDetails = {
+  name: string | null;
+  mounts: DockerContainerMount[];
+  networkNames: string[];
+};
+
+function normalizeContainerName(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^\/+/, "") || null;
+}
+
 export function resolveMountSourcePath(input: {
   containerPath: string;
   mounts: DockerContainerMount[];
@@ -194,10 +207,7 @@ export function resolveMountSourcePath(input: {
   throw new Error(`No source mount found for container path ${input.containerPath}`);
 }
 
-async function inspectContainerDetails(containerName: string): Promise<{
-  mounts: DockerContainerMount[];
-  networkNames: string[];
-}> {
+async function inspectContainerDetails(containerName: string): Promise<InspectedContainerDetails> {
   const response = await dockerApiRequest({
     method: "GET",
     path: `/containers/${encodeURIComponent(containerName)}/json`,
@@ -206,12 +216,39 @@ async function inspectContainerDetails(containerName: string): Promise<{
     throw new Error(`docker inspect failed (${response.statusCode}): ${response.body}`);
   }
   const parsed = JSON.parse(response.body) as {
+    Name?: string;
     Mounts?: DockerContainerMount[];
     NetworkSettings?: { Networks?: Record<string, unknown> };
   };
+  const name = normalizeContainerName(parsed.Name);
   const mounts = Array.isArray(parsed.Mounts) ? parsed.Mounts : [];
   const networkNames = parsed.NetworkSettings?.Networks ? Object.keys(parsed.NetworkSettings.Networks) : [];
-  return { mounts, networkNames };
+  return { name, mounts, networkNames };
+}
+
+export async function resolveHermesContainerSourceContainerName(): Promise<string> {
+  const explicit = normalizeContainerName(process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER);
+  if (explicit) return explicit;
+
+  const hostnameRef = normalizeContainerName(process.env.HOSTNAME);
+  if (hostnameRef) {
+    const details = await inspectContainerDetails(hostnameRef);
+    if (details.name) return details.name;
+    return hostnameRef;
+  }
+
+  return "paperclip-server-1";
+}
+
+export async function resolveHermesContainerApiUrl(): Promise<string> {
+  const explicit = process.env.PAPERCLIP_HERMES_CONTAINER_API_URL;
+  if (typeof explicit === "string" && explicit.trim().length > 0) {
+    return explicit.trim();
+  }
+
+  const sourceContainerName = await resolveHermesContainerSourceContainerName();
+  const listenPort = process.env.PAPERCLIP_LISTEN_PORT ?? process.env.PORT ?? "3100";
+  return `http://${sourceContainerName}:${listenPort}`;
 }
 
 export function buildDockerBindsFromPlan(input: {
@@ -236,7 +273,7 @@ export async function createAndStartHermesContainer(input: {
   workspaceCwd: string;
 }): Promise<string> {
   const containerName = buildContainerName({ runId: input.runId, serviceId: input.serviceId });
-  const sourceContainer = process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER || "paperclip-server-1";
+  const sourceContainer = await resolveHermesContainerSourceContainerName();
   const sourceContainerDetails = await inspectContainerDetails(sourceContainer);
   const binds = buildDockerBindsFromPlan({
     plan: input.plan,

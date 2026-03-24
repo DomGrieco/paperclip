@@ -1,6 +1,7 @@
 import * as http from "node:http";
 import { buildPaperclipEnv, renderTemplate } from "@paperclipai/adapter-utils/server-utils";
 import type { AdapterExecutionContext, AdapterExecutionResult, UsageSummary } from "../adapters/types.js";
+import { resolveHermesContainerApiUrl } from "./hermes-container-launcher.js";
 
 const HERMES_CLI = "hermes";
 const DEFAULT_TIMEOUT_SEC = 300;
@@ -324,13 +325,12 @@ function findHermesContainerId(ctx: AdapterExecutionContext): string | null {
 
 export async function executeHermesInContainer(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
   const rawConfig = (ctx.agent?.adapterConfig ?? {}) as Record<string, unknown>;
+  const paperclipApiUrl =
+    cfgString(rawConfig.paperclipApiUrl) ||
+    (await resolveHermesContainerApiUrl());
   const config: Record<string, unknown> = {
     ...rawConfig,
-    paperclipApiUrl:
-      process.env.PAPERCLIP_HERMES_CONTAINER_API_URL ||
-      process.env.PAPERCLIP_API_URL ||
-      cfgString(rawConfig.paperclipApiUrl) ||
-      "http://paperclip-server-1:3100",
+    paperclipApiUrl,
   };
   const containerId = findHermesContainerId(ctx);
   if (!containerId) {
@@ -367,14 +367,10 @@ export async function executeHermesInContainer(ctx: AdapterExecutionContext): Pr
   const execEnv = {
     ...buildPaperclipEnv(ctx.agent),
     PAPERCLIP_RUN_ID: ctx.runId,
-    PAPERCLIP_API_URL: process.env.PAPERCLIP_HERMES_CONTAINER_API_URL || process.env.PAPERCLIP_API_URL || "http://paperclip-server-1:3100",
+    PAPERCLIP_API_URL: paperclipApiUrl,
     HERMES_HOME: CONTAINER_HERMES_HOME,
     TERMINAL_CWD: CONTAINER_WORKDIR,
-    PAPERCLIP_RUNTIME_ROOT: CONTAINER_RUNTIME_ROOT,
-    PAPERCLIP_RUNTIME_BUNDLE_PATH: CONTAINER_RUNTIME_BUNDLE_PATH,
-    PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: CONTAINER_RUNTIME_INSTRUCTIONS_PATH,
     PAPERCLIP_API_HELPER_PATH: CONTAINER_API_HELPER_PATH,
-    PAPERCLIP_SHARED_CONTEXT_PATH: CONTAINER_SHARED_CONTEXT_PATH,
   } as Record<string, string>;
   const taskId = cfgString(ctx.config?.taskId);
   if (taskId) execEnv.PAPERCLIP_TASK_ID = taskId;
@@ -388,6 +384,18 @@ export async function executeHermesInContainer(ctx: AdapterExecutionContext): Pr
     }
     if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_PROJECT_ID === "string") {
       execEnv.PAPERCLIP_PROJECT_ID = (userEnv as Record<string, string>).PAPERCLIP_PROJECT_ID;
+    }
+    if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_RUNTIME_ROOT === "string") {
+      execEnv.PAPERCLIP_RUNTIME_ROOT = CONTAINER_RUNTIME_ROOT;
+    }
+    if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_RUNTIME_BUNDLE_PATH === "string") {
+      execEnv.PAPERCLIP_RUNTIME_BUNDLE_PATH = CONTAINER_RUNTIME_BUNDLE_PATH;
+    }
+    if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH === "string") {
+      execEnv.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH = CONTAINER_RUNTIME_INSTRUCTIONS_PATH;
+    }
+    if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_SHARED_CONTEXT_PATH === "string") {
+      execEnv.PAPERCLIP_SHARED_CONTEXT_PATH = CONTAINER_SHARED_CONTEXT_PATH;
     }
     if (typeof (userEnv as Record<string, unknown>).PAPERCLIP_SHARED_CONTEXT_JSON === "string") {
       execEnv.PAPERCLIP_SHARED_CONTEXT_JSON = (userEnv as Record<string, string>).PAPERCLIP_SHARED_CONTEXT_JSON;
