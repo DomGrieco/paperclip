@@ -42,13 +42,39 @@ function headersFromExpressRequest(req: Request): Headers {
   return headersFromNodeHeaders(req.headers);
 }
 
+function addLoopbackOriginAlternatives(trustedOrigins: Set<string>, origin: string) {
+  try {
+    const url = new URL(origin);
+    const host = url.hostname.trim().toLowerCase();
+    const loopbackAlternatives =
+      host === "localhost"
+        ? ["127.0.0.1"]
+        : host === "127.0.0.1"
+          ? ["localhost"]
+          : [];
+    for (const altHost of loopbackAlternatives) {
+      const alt = new URL(origin);
+      alt.hostname = altHost;
+      trustedOrigins.add(alt.origin);
+      if ((alt.protocol === "http:" && alt.port === "80") || (alt.protocol === "https:" && alt.port === "443")) {
+        alt.port = "";
+        trustedOrigins.add(alt.origin);
+      }
+    }
+  } catch {
+    // Ignore malformed origins here; Better Auth will surface invalid base URLs elsewhere.
+  }
+}
+
 export function deriveAuthTrustedOrigins(config: Config): string[] {
   const baseUrl = config.authBaseUrlMode === "explicit" ? config.authPublicBaseUrl : undefined;
   const trustedOrigins = new Set<string>();
 
   if (baseUrl) {
     try {
-      trustedOrigins.add(new URL(baseUrl).origin);
+      const parsed = new URL(baseUrl);
+      trustedOrigins.add(parsed.origin);
+      addLoopbackOriginAlternatives(trustedOrigins, parsed.origin);
     } catch {
       // Better Auth will surface invalid base URL separately.
     }
@@ -57,8 +83,12 @@ export function deriveAuthTrustedOrigins(config: Config): string[] {
     for (const hostname of config.allowedHostnames) {
       const trimmed = hostname.trim().toLowerCase();
       if (!trimmed) continue;
-      trustedOrigins.add(`https://${trimmed}`);
-      trustedOrigins.add(`http://${trimmed}`);
+      const httpOrigin = `http://${trimmed}`;
+      const httpsOrigin = `https://${trimmed}`;
+      trustedOrigins.add(httpsOrigin);
+      trustedOrigins.add(httpOrigin);
+      addLoopbackOriginAlternatives(trustedOrigins, httpOrigin);
+      addLoopbackOriginAlternatives(trustedOrigins, httpsOrigin);
     }
   }
 
