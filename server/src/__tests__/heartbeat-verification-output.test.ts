@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import {
+  activityLog,
   agents,
   applyPendingMigrations,
   companies,
@@ -196,6 +197,20 @@ describe("heartbeat verification output ingestion", () => {
     expect(runningRun?.startedAt).not.toBeNull();
     expect(new Date(runningAgent.lastHeartbeatAt!).toISOString()).toBe(
       new Date(runningRun!.startedAt!).toISOString(),
+    );
+
+    const startedActivity = await db
+      .select()
+      .from(activityLog)
+      .where(eq(activityLog.entityId, run!.id))
+      .then((rows) => rows.find((row) => row.action === "heartbeat.started") ?? null);
+    expect(startedActivity).toEqual(
+      expect.objectContaining({
+        entityType: "heartbeat_run",
+        entityId: run!.id,
+        action: "heartbeat.started",
+        details: { agentId: agent.id },
+      }),
     );
 
     releaseExecution?.();

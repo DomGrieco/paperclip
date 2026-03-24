@@ -50,6 +50,7 @@ import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
+import { logActivity } from "./activity-log.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   gateProjectExecutionWorkspacePolicy,
@@ -1345,6 +1346,41 @@ export function heartbeatService(db: Db) {
       .where(eq(agentWakeupRequests.id, wakeupRequestId));
   }
 
+  async function logHeartbeatStartedActivity(run: typeof heartbeatRuns.$inferSelect) {
+    let actorType: "user" | "agent" | "system" = "system";
+    let actorId = "system";
+
+    if (run.wakeupRequestId) {
+      const wake = await db
+        .select({
+          requestedByActorType: agentWakeupRequests.requestedByActorType,
+          requestedByActorId: agentWakeupRequests.requestedByActorId,
+        })
+        .from(agentWakeupRequests)
+        .where(eq(agentWakeupRequests.id, run.wakeupRequestId))
+        .then((rows) => rows[0] ?? null);
+
+      if (wake?.requestedByActorType === "user" || wake?.requestedByActorType === "agent") {
+        actorType = wake.requestedByActorType;
+      }
+      if (typeof wake?.requestedByActorId === "string" && wake.requestedByActorId.trim().length > 0) {
+        actorId = wake.requestedByActorId.trim();
+      }
+    }
+
+    await logActivity(db, {
+      companyId: run.companyId,
+      actorType,
+      actorId,
+      agentId: actorType === "agent" ? actorId : null,
+      runId: run.id,
+      action: "heartbeat.started",
+      entityType: "heartbeat_run",
+      entityId: run.id,
+      details: { agentId: run.agentId },
+    });
+  }
+
   async function appendRunEvent(
     run: typeof heartbeatRuns.$inferSelect,
     seq: number,
@@ -2127,6 +2163,7 @@ export function heartbeatService(db: Db) {
           },
         });
       }
+      await logHeartbeatStartedActivity(run);
 
       const currentRun = run;
       await appendRunEvent(currentRun, seq++, {
