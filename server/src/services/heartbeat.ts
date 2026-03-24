@@ -4,7 +4,8 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import type { BillingType, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
+import { swarmPlanSchema } from "@paperclipai/shared";
+import type { BillingType, RuntimeBundle, RuntimeBundleTarget, SwarmPlan } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -316,6 +317,28 @@ export function prioritizeProjectWorkspaceCandidatesForRun<T extends ProjectWork
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function readPlannerSwarmPlan(resultJson: Record<string, unknown> | null | undefined, plannerRunId: string): SwarmPlan | null {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) return null;
+
+  const orchestration = parseObject(resultJson.orchestration);
+  const candidates: unknown[] = [
+    resultJson.swarmPlan,
+    resultJson.plan,
+    orchestration?.swarmPlan,
+    resultJson,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = swarmPlanSchema.safeParse({
+      ...(typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) ? candidate : {}),
+      plannerRunId,
+    });
+    if (parsed.success) return parsed.data;
+  }
+
+  return null;
 }
 
 function normalizeLedgerBillingType(value: unknown): BillingType {
@@ -2497,13 +2520,21 @@ export function heartbeatService(db: Db) {
 
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {
+        if (finalizedRun.runType === "planner" && outcome === "succeeded") {
+          const plannerSwarmPlan = readPlannerSwarmPlan(adapterResult.resultJson ?? null, finalizedRun.id);
+          if (plannerSwarmPlan) {
+            await issueRunGraph.attachSwarmPlan(finalizedRun.id, plannerSwarmPlan);
+            await issueRunGraph.materializePlannedWorkers(finalizedRun.id);
+          }
+        }
         if (finalizedRun.runType === "verification") {
           const verificationOutcome = await issueRunEvidence.syncVerificationOutcome(finalizedRun.id);
           if (verificationOutcome?.verificationVerdict === "repair") {
             await issueRunGraph.scheduleRepairFromVerification(finalizedRun.id);
           }
         }
-        await appendRunEvent(finalizedRun, seq++, {
+        const runForEvent = await getRun(finalizedRun.id) ?? finalizedRun;
+        await appendRunEvent(runForEvent, seq++, {
           eventType: "lifecycle",
           stream: "system",
           level: outcome === "succeeded" ? "info" : "error",
@@ -2513,7 +2544,7 @@ export function heartbeatService(db: Db) {
             exitCode: adapterResult.exitCode,
           },
         });
-        await releaseIssueExecutionAndPromote(finalizedRun);
+        await releaseIssueExecutionAndPromote(runForEvent);
       }
 
       if (finalizedRun) {

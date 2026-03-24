@@ -279,6 +279,48 @@ export function issueRunGraphService(db: Db) {
     return inserted;
   }
 
+  async function materializePlannedWorkers(rootRunId: string) {
+    const root = await getRun(rootRunId);
+    if (!root) throw notFound("Planner root not found");
+    if (root.runType !== "planner") throw conflict("Planned worker materialization requires a planner root");
+
+    const swarmPlan = readSwarmPlan(root.contextSnapshot);
+    if (!swarmPlan) return [];
+
+    const existingChildren = await db
+      .select({
+        taskKey: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'taskKey'`,
+        swarmSubtaskId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'swarmSubtaskId'`,
+      })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.parentRunId, root.id));
+
+    const occupiedKeys = new Set<string>();
+    for (const child of existingChildren) {
+      if (typeof child.taskKey === "string" && child.taskKey.trim().length > 0) occupiedKeys.add(child.taskKey.trim());
+      if (typeof child.swarmSubtaskId === "string" && child.swarmSubtaskId.trim().length > 0) {
+        occupiedKeys.add(child.swarmSubtaskId.trim());
+      }
+    }
+
+    const pendingSubtasks = swarmPlan.subtasks.filter((subtask) => {
+      const taskKey = subtask.taskKey ?? subtask.id;
+      return !occupiedKeys.has(subtask.id) && !occupiedKeys.has(taskKey);
+    });
+    if (pendingSubtasks.length === 0) return [];
+
+    return spawnWorkers(
+      root.id,
+      pendingSubtasks.map((subtask) => ({
+        taskKey: subtask.taskKey,
+        subtask,
+        contextSnapshot: {
+          plannerRunId: root.id,
+        },
+      })),
+    );
+  }
+
   async function scheduleRepairFromVerification(verificationRunId: string) {
     const verification = await getRun(verificationRunId);
     if (!verification) throw notFound("Verification run not found");
@@ -404,6 +446,7 @@ export function issueRunGraphService(db: Db) {
   return {
     attachSwarmPlan,
     getIssueSummary,
+    materializePlannedWorkers,
     resolvePlannerGraph,
     scheduleRepairFromVerification,
     spawnWorkers,

@@ -298,6 +298,152 @@ describe("heartbeat verification output ingestion", () => {
     expect(finalized.status).toBe("succeeded");
   }, 20_000);
 
+  it("fans out worker children from planner-produced swarm plans", async () => {
+    adapterMocks.execute.mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      resultJson: {
+        swarmPlan: {
+          version: "v1",
+          rationale: "Split implementation and verification.",
+          subtasks: [
+            {
+              id: "worker-heartbeat-ui",
+              kind: "implementation",
+              title: "Update heartbeat UI labels",
+              goal: "Render request/start states distinctly in the issue timeline.",
+              taskKey: "heartbeat-ui",
+              allowedPaths: ["ui/src/components/ActivityRow.tsx"],
+              ownershipMode: "exclusive",
+              expectedArtifacts: [{ kind: "patch", required: true }],
+              acceptanceChecks: ["UI shows heartbeat.requested and heartbeat.started distinctly."],
+              recommendedModelTier: "balanced",
+              budgetCents: 25,
+              maxRuntimeSec: 900,
+            },
+            {
+              id: "verify-heartbeat-ui",
+              kind: "verification",
+              title: "Verify heartbeat UI labels",
+              goal: "Verify the updated timeline labels in a browser check.",
+              taskKey: "verify-heartbeat-ui",
+              expectedArtifacts: [{ kind: "test_result", required: true }],
+              acceptanceChecks: ["Browser validation confirms distinct request/start labels."],
+              recommendedModelTier: "premium",
+              budgetCents: 20,
+              maxRuntimeSec: 600,
+              dependsOn: ["worker-heartbeat-ui"],
+            },
+          ],
+        },
+      },
+    });
+
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Hermes CEO",
+      role: "ceo",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Planner fan-out ingestion",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const run = await heartbeat.wakeup(agent.id, {
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: { issueId: issue.id, mutation: "update" },
+      contextSnapshot: {
+        source: "issue.update",
+        issueId: issue.id,
+        wakeReason: "issue_assigned",
+      },
+    });
+
+    expect(run).not.toBeNull();
+    expect(run?.runType).toBe("planner");
+
+    await heartbeat.resumeQueuedRuns();
+    const finalized = await waitForRunTerminalState(db, run!.id);
+    const children = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.parentRunId, run!.id));
+    const summary = await graph.getIssueSummary(issue.id);
+
+    expect(finalized.status).toBe("succeeded");
+    expect(finalized.contextSnapshot).toEqual(
+      expect.objectContaining({
+        swarmPlan: expect.objectContaining({
+          version: "v1",
+          plannerRunId: run!.id,
+        }),
+        swarmAdmission: expect.objectContaining({
+          admitted: true,
+          subtaskCount: 2,
+        }),
+      }),
+    );
+    expect(children).toHaveLength(2);
+    expect(children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runType: "worker",
+          rootRunId: run!.id,
+          parentRunId: run!.id,
+          policySnapshotJson: expect.objectContaining({
+            swarmPlannerRunId: run!.id,
+            swarmSubtaskId: "worker-heartbeat-ui",
+          }),
+          contextSnapshot: expect.objectContaining({
+            issueId: issue.id,
+            taskKey: "heartbeat-ui",
+            swarmSubtaskId: "worker-heartbeat-ui",
+            swarmModelTier: "balanced",
+          }),
+        }),
+        expect.objectContaining({
+          runType: "worker",
+          rootRunId: run!.id,
+          parentRunId: run!.id,
+          policySnapshotJson: expect.objectContaining({
+            swarmPlannerRunId: run!.id,
+            swarmSubtaskId: "verify-heartbeat-ui",
+          }),
+          contextSnapshot: expect.objectContaining({
+            issueId: issue.id,
+            taskKey: "verify-heartbeat-ui",
+            swarmSubtaskId: "verify-heartbeat-ui",
+            swarmModelTier: "premium",
+          }),
+        }),
+      ]),
+    );
+    expect(summary.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: run!.id, runType: "planner", status: "succeeded" }),
+        expect.objectContaining({ runType: "worker", parentRunId: run!.id }),
+      ]),
+    );
+  }, 20_000);
+
   it("captures hermes-container runtime services for assignment-backed planner runs", async () => {
     adapterMocks.execute.mockResolvedValue({
       exitCode: 0,
