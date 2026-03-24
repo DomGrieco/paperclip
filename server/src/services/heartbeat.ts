@@ -2301,14 +2301,14 @@ export function heartbeatService(db: Db) {
             reports: adapterResult.runtimeServices,
           })
         : [];
+      const observedRuntimeServices =
+        adapterManagedRuntimeServices.length > 0
+          ? [...runtimeServices, ...adapterManagedRuntimeServices]
+          : runtimeServices;
       if (adapterManagedRuntimeServices.length > 0) {
-        const combinedRuntimeServices = [
-          ...runtimeServices,
-          ...adapterManagedRuntimeServices,
-        ];
-        context.paperclipRuntimeServices = combinedRuntimeServices;
+        context.paperclipRuntimeServices = observedRuntimeServices;
         context.paperclipRuntimePrimaryUrl =
-          combinedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+          observedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
         await db
           .update(heartbeatRuns)
           .set({
@@ -2424,7 +2424,7 @@ export function heartbeatService(db: Db) {
         resultJson: adapterResult.resultJson ?? null,
         verificationVerdict:
           run.runType === "verification" ? readAdapterVerificationVerdict(adapterResult.verificationVerdict) : null,
-        runnerSnapshotJson: (resolveObservedRunnerSnapshot({ planned: runtimeBundle?.runner ?? { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" }, runtimeServices }) as unknown as Record<string, unknown> | null | undefined) ?? null,
+        runnerSnapshotJson: (resolveObservedRunnerSnapshot({ planned: runtimeBundle?.runner ?? { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" }, runtimeServices: observedRuntimeServices }) as unknown as Record<string, unknown> | null | undefined) ?? null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,
         stderrExcerpt,

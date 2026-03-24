@@ -283,6 +283,101 @@ describe("heartbeat verification output ingestion", () => {
     expect(finalized.status).toBe("succeeded");
   }, 20_000);
 
+  it("captures hermes-container runtime services for assignment-backed planner runs", async () => {
+    adapterMocks.execute.mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      runtimeServices: [
+        {
+          serviceName: "hermes-worker",
+          provider: "hermes_container",
+          providerRef: "container-123",
+          scopeType: "run",
+          scopeId: "run-placeholder",
+          url: "http://hermes-worker.internal",
+        },
+      ],
+    });
+
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const heartbeat = heartbeatService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Hermes CEO",
+      role: "ceo",
+      adapterType: "hermes_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Hermes planner runtime services",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const run = await heartbeat.wakeup(agent.id, {
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: { issueId: issue.id, mutation: "update" },
+      contextSnapshot: {
+        source: "issue.update",
+        issueId: issue.id,
+        wakeReason: "issue_assigned",
+      },
+    });
+
+    expect(run).not.toBeNull();
+    expect(run?.runType).toBe("planner");
+
+    await heartbeat.resumeQueuedRuns();
+    const finalized = await waitForRunTerminalState(db, run!.id);
+    const runtimeServices = Array.isArray(finalized.contextSnapshot?.paperclipRuntimeServices)
+      ? finalized.contextSnapshot.paperclipRuntimeServices
+      : [];
+
+    expect(finalized.status).toBe("succeeded");
+    expect(finalized.runnerSnapshotJson).toEqual({
+      target: "hermes_container",
+      provider: "hermes_container",
+      workspaceStrategyType: null,
+      executionMode: null,
+      browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+    expect(finalized.contextSnapshot).toEqual(
+      expect.objectContaining({
+        issueId: issue.id,
+        wakeReason: "issue_assigned",
+        paperclipRuntimePrimaryUrl: "http://hermes-worker.internal",
+      }),
+    );
+    expect(runtimeServices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: "hermes_container",
+          providerRef: "container-123",
+          serviceName: "hermes-worker",
+          scopeType: "run",
+          scopeId: "run-placeholder",
+          startedByRunId: finalized.id,
+          ownerAgentId: agent.id,
+          url: "http://hermes-worker.internal",
+        }),
+      ]),
+    );
+  }, 20_000);
+
   it("persists adapter-reported verification verdicts and syncs the issue evidence bundle", async () => {
     adapterMocks.execute.mockResolvedValue({
       exitCode: 0,

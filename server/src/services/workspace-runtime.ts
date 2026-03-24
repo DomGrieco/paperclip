@@ -134,7 +134,7 @@ function stableRuntimeServiceId(input: {
     )
     .digest("hex")
     .slice(0, 32);
-  return `${input.adapterType}-${digest}`;
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
 function toRuntimeServiceRef(record: RuntimeServiceRecord, overrides?: Partial<RuntimeServiceRef>): RuntimeServiceRef {
