@@ -19,6 +19,7 @@ import type {
 } from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
+import { sharedContextService } from "./shared-context-publications.js";
 import { buildSwarmPolicySnapshot, resolveSwarmModelTier, shouldSwarm } from "./swarm-policy.js";
 
 const MAX_WORKER_CHILDREN = 16;
@@ -383,6 +384,7 @@ export function issueRunGraphService(db: Db) {
   async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
     return db.transaction(async (tx) => {
       const scopedEvidence = issueRunEvidenceService(tx as unknown as Db);
+      const scopedSharedContext = sharedContextService(tx as unknown as Db);
       const issue = await tx
         .select({
           id: issues.id,
@@ -416,6 +418,9 @@ export function issueRunGraphService(db: Db) {
         .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
 
       const evidenceBundle = await scopedEvidence.getIssueEvidenceBundle(issue.id);
+      const issueSharedContextPublications = await scopedSharedContext.list(issue.companyId, {
+        issueId: issue.id,
+      });
       const rootRunId =
         runs.find((run) => run.runType === "planner")?.id ??
         runs.find((run) => run.graphDepth === 0)?.id ??
@@ -428,6 +433,7 @@ export function issueRunGraphService(db: Db) {
         evidencePolicy: evidenceBundle.policy,
         evidencePolicySource: evidenceBundle.policySource,
         evidenceBundle,
+        issueSharedContextPublications,
         nodes: runs.map((run) => ({
           id: run.id,
           runType: asRunType(run.runType),

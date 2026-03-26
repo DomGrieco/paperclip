@@ -20,6 +20,30 @@ const orchestration: IssueOrchestrationSummary = {
   evidencePolicy: "code_ci_evaluator_summary",
   evidencePolicySource: "company_default",
   evidenceBundle: null,
+  issueSharedContextPublications: [
+    {
+      id: "pub-1",
+      companyId: "company-1",
+      projectId: null,
+      issueId: "issue-1",
+      sourceAgentId: "agent-shared-1234",
+      createdByRunId: "run-shared-5678",
+      title: "API auth gotcha",
+      summary: "Use Paperclip helper auth headers instead of ad hoc curl tokens.",
+      body: "The runtime bundle already injects the helper auth surface for local fleet runs.",
+      tags: ["hermes", "auth"],
+      visibility: "issue",
+      audienceAgentIds: [],
+      status: "published",
+      freshness: "recent",
+      freshnessAt: "2026-03-24T19:30:00.000Z",
+      confidence: 0.91,
+      rank: 5,
+      provenance: { source: "runtime_bundle" },
+      createdAt: new Date("2026-03-24T19:20:00.000Z"),
+      updatedAt: new Date("2026-03-24T19:30:00.000Z"),
+    },
+  ],
   nodes: [
     {
       id: "run-plan",
@@ -132,6 +156,10 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Browser Capable");
     expect(html).toContain("/TST/agents/agent-plan/runs/run-plan");
     expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
+    expect(html).toContain("Shared Context");
+    expect(html).toContain("API auth gotcha");
+    expect(html).toContain("Issue Scope");
+    expect(html).toContain("#hermes");
   });
 
   it("renders evaluator summary and artifact evidence details", () => {

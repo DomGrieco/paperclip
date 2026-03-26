@@ -12,6 +12,7 @@ import {
   ensurePostgresDatabase,
   issues,
   heartbeatRuns,
+  sharedContextPublications,
 } from "@paperclipai/db";
 import type { HeartbeatRun } from "@paperclipai/shared";
 import { issueRunGraphService } from "../services/issue-run-graph.js";
@@ -194,6 +195,86 @@ describe("run graph schema contract", () => {
     );
     expect(children).toHaveLength(2);
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
+  }, 20_000);
+
+  it("includes issue-scoped shared-context publications in the orchestration summary", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Surface shared context",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    await db.insert(sharedContextPublications).values([
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: agent.id,
+        createdByRunId: null,
+        title: "Keep helper auth",
+        summary: "Worker runs should call the helper auth surface instead of raw localhost tokens.",
+        body: "The helper-first path keeps fleet execution aligned with Paperclip governance.",
+        tags: ["auth", "runtime"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "published",
+        freshness: "recent",
+        freshnessAt: new Date("2026-03-24T20:10:00.000Z"),
+        confidence: 92,
+        rank: 3,
+        provenance: { source: "test" },
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: agent.id,
+        createdByRunId: null,
+        title: "Needs review",
+        summary: null,
+        body: "Operator should confirm whether this gets promoted to company scope.",
+        tags: ["review"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "proposed",
+        freshness: "live",
+        freshnessAt: new Date("2026-03-24T20:20:00.000Z"),
+        confidence: null,
+        rank: 7,
+        provenance: { source: "test" },
+      },
+    ]);
+
+    const summary = await graph.getIssueSummary(issue.id);
+
+    expect(summary.issueSharedContextPublications).toEqual([
+      expect.objectContaining({
+        title: "Needs review",
+        status: "proposed",
+        freshness: "live",
+      }),
+      expect.objectContaining({
+        title: "Keep helper auth",
+        status: "published",
+        freshness: "recent",
+      }),
+    ]);
   }, 20_000);
 
   it("persists validated swarm plans on planner roots and bounded subtask packets on workers", async () => {

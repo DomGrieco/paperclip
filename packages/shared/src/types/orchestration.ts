@@ -329,5 +329,6 @@ export interface IssueOrchestrationSummary {
   evidencePolicy: EvidencePolicy;
   evidencePolicySource: EvidencePolicySource;
   evidenceBundle?: IssueEvidenceBundle | null;
+  issueSharedContextPublications?: SharedContextPublication[];
   nodes: IssueRunGraphSummaryNode[];
 }
