@@ -1,15 +1,23 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildDockerBindsFromPlan,
   buildHermesContainerDockerArgs,
   injectHermesContainerLauncherService,
   isHermesContainerLauncherEnabled,
+  resolveHermesContainerSourceContainerName,
   resolveMountSourcePath,
+  selectComposeServiceContainerName,
   stableHermesContainerRuntimeServiceId,
 } from "../services/hermes-container-launcher.js";
 
 afterEach(() => {
   delete process.env.PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED;
+  delete process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER;
+  delete process.env.PAPERCLIP_HERMES_CONTAINER_API_URL;
+  delete process.env.HOSTNAME;
+  delete process.env.COMPOSE_PROJECT_NAME;
+  delete process.env.PAPERCLIP_LISTEN_PORT;
+  vi.restoreAllMocks();
 });
 
 describe("hermes-container-launcher", () => {
@@ -109,6 +117,31 @@ describe("hermes-container-launcher", () => {
         ],
       }),
     ).toBe("/var/lib/docker/volumes/paperclip-data/_data/instances/default/workspaces/agent-1");
+  });
+
+  it("selects the running compose server-dev container name when HOSTNAME is unavailable", () => {
+    expect(
+      selectComposeServiceContainerName({
+        project: "paperclip",
+        serviceNames: ["server-dev", "server"],
+        containers: [
+          {
+            Names: ["/paperclip-server-dev-1"],
+            State: "running",
+            Labels: {
+              "com.docker.compose.project": "paperclip",
+              "com.docker.compose.service": "server-dev",
+              "com.docker.compose.oneoff": "False",
+            },
+          },
+        ],
+      }),
+    ).toBe("paperclip-server-dev-1");
+  });
+
+  it("still prefers an explicit container source override", async () => {
+    process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER = "explicit-paperclip-server";
+    await expect(resolveHermesContainerSourceContainerName()).resolves.toBe("explicit-paperclip-server");
   });
 
   it("builds narrowed bind mounts from the launch plan instead of sharing the whole Paperclip volume", () => {

@@ -226,6 +226,60 @@ async function inspectContainerDetails(containerName: string): Promise<Inspected
   return { name, mounts, networkNames };
 }
 
+type DockerContainerSummary = {
+  Names?: string[];
+  Labels?: Record<string, string>;
+  State?: string;
+};
+
+export function selectComposeServiceContainerName(input: {
+  project?: string | null;
+  serviceNames: string[];
+  containers: DockerContainerSummary[];
+}): string | null {
+  const requestedServices = new Set(
+    input.serviceNames
+      .map((value) => normalizeContainerName(value))
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  );
+  if (requestedServices.size === 0) return null;
+
+  for (const container of input.containers) {
+    const labels = container.Labels ?? {};
+    if (labels["com.docker.compose.oneoff"] === "True") continue;
+    if (container.State && container.State !== "running") continue;
+    if (input.project && labels["com.docker.compose.project"] !== input.project) continue;
+    const service = normalizeContainerName(labels["com.docker.compose.service"]);
+    if (!service || !requestedServices.has(service)) continue;
+    const names = Array.isArray(container.Names) ? container.Names : [];
+    const resolvedName = names
+      .map((value) => normalizeContainerName(value))
+      .find((value): value is string => Boolean(value));
+    if (resolvedName) return resolvedName;
+  }
+
+  return null;
+}
+
+async function findComposeServiceContainerName(input: {
+  project?: string | null;
+  serviceNames: string[];
+}): Promise<string | null> {
+  const response = await dockerApiRequest({
+    method: "GET",
+    path: "/containers/json",
+  });
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(`docker container list failed (${response.statusCode}): ${response.body}`);
+  }
+  const parsed = JSON.parse(response.body) as DockerContainerSummary[];
+  return selectComposeServiceContainerName({
+    project: input.project,
+    serviceNames: input.serviceNames,
+    containers: parsed,
+  });
+}
+
 export async function resolveHermesContainerSourceContainerName(): Promise<string> {
   const explicit = normalizeContainerName(process.env.PAPERCLIP_HERMES_CONTAINER_SOURCE_CONTAINER);
   if (explicit) return explicit;
@@ -236,6 +290,13 @@ export async function resolveHermesContainerSourceContainerName(): Promise<strin
     if (details.name) return details.name;
     return hostnameRef;
   }
+
+  const composeProject = normalizeContainerName(process.env.COMPOSE_PROJECT_NAME) ?? "paperclip";
+  const composeServiceFallback = await findComposeServiceContainerName({
+    project: composeProject,
+    serviceNames: ["server-dev", "server"],
+  });
+  if (composeServiceFallback) return composeServiceFallback;
 
   return "paperclip-server-1";
 }
