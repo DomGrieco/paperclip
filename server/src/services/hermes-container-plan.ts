@@ -6,8 +6,10 @@ const DEFAULT_HERMES_CONTAINER_IMAGE = "paperclip/hermes-worker:dev";
 const CONTAINER_WORKSPACE_ROOT = "/workspace";
 const CONTAINER_AGENT_HOME_ROOT = "/home/hermes/.hermes";
 const CONTAINER_RUNTIME_ROOT = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "runtime");
+const CONTAINER_MANAGED_RUNTIME_ROOT = "/paperclip/runtime/hermes-managed";
 const CONTAINER_SHARED_AUTH_ROOT = "/paperclip/shared/hermes-home-source";
 const CONTAINER_SHARED_CONTEXT_PATH = path.posix.join(CONTAINER_WORKSPACE_ROOT, ".paperclip", "context", "shared-context.json");
+
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -72,13 +74,19 @@ export function buildHermesContainerLaunchPlan(input: {
   const agentHomeHostPath = readString(envRecord.HERMES_HOME) ?? path.join(workspaceHostPath, ".paperclip", "hermes-home");
   const sharedAuthSourceHostPath = readString(envRecord.PAPERCLIP_HERMES_SHARED_HOME_SOURCE);
   const runtimeBundleHostRoot = readString(envRecord.PAPERCLIP_RUNTIME_ROOT);
+  const managedRuntimeHostRoot = readString(envRecord.PAPERCLIP_HERMES_MANAGED_RUNTIME_ROOT);
   const sharedContextHostPath = readString(envRecord.PAPERCLIP_SHARED_CONTEXT_PATH);
   const image =
     readString(envRecord.PAPERCLIP_HERMES_CONTAINER_IMAGE) ??
     readString(input.executionConfig.containerImage) ??
     DEFAULT_HERMES_CONTAINER_IMAGE;
+  const configuredHermesCommand =
+    readString(input.executionConfig.hermesCommand) ??
+    readString(envRecord.PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND) ??
+    readString(input.executionConfig.command) ??
+    "hermes";
   const command = [
-    readString(input.executionConfig.command) ?? "hermes",
+    normalizeHostAwareEnvPath(configuredHermesCommand, managedRuntimeHostRoot, CONTAINER_MANAGED_RUNTIME_ROOT) ?? configuredHermesCommand,
     ...((Array.isArray(input.executionConfig.args)
       ? input.executionConfig.args.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
       : []) as string[]),
@@ -115,6 +123,12 @@ export function buildHermesContainerLaunchPlan(input: {
     } else if (name === "PAPERCLIP_HERMES_SHARED_HOME_SOURCE") {
       nextValue = CONTAINER_SHARED_AUTH_ROOT;
       source = "shared_auth";
+    } else if (name === "PAPERCLIP_HERMES_MANAGED_RUNTIME_ROOT") {
+      nextValue = CONTAINER_MANAGED_RUNTIME_ROOT;
+      source = "managed_runtime";
+    } else if (name === "PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND" || name === "PAPERCLIP_HERMES_MANAGED_RUNTIME_PYTHON_COMMAND") {
+      nextValue = normalizeHostAwareEnvPath(value, managedRuntimeHostRoot, CONTAINER_MANAGED_RUNTIME_ROOT) ?? value;
+      source = "managed_runtime";
     } else if (name === "PAPERCLIP_RUNTIME_ROOT") {
       nextValue = CONTAINER_RUNTIME_ROOT;
       source = "runtime_bundle";
@@ -171,6 +185,16 @@ export function buildHermesContainerLaunchPlan(input: {
       containerPath: CONTAINER_RUNTIME_ROOT,
       readOnly: true,
       purpose: "Paperclip runtime bundle projection and instructions for the current run.",
+    });
+  }
+
+  if (managedRuntimeHostRoot) {
+    mounts.push({
+      kind: "managed_runtime",
+      hostPath: managedRuntimeHostRoot,
+      containerPath: CONTAINER_MANAGED_RUNTIME_ROOT,
+      readOnly: true,
+      purpose: "Paperclip-managed Hermes runtime cache mounted read-only for automatic runtime updates.",
     });
   }
 

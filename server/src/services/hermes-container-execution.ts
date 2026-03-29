@@ -340,7 +340,7 @@ function findHermesContainerId(ctx: AdapterExecutionContext): string | null {
 }
 
 export async function executeHermesInContainer(ctx: AdapterExecutionContext): Promise<AdapterExecutionResult> {
-  const rawConfig = (ctx.agent?.adapterConfig ?? {}) as Record<string, unknown>;
+  const rawConfig = (ctx.config ?? ctx.agent?.adapterConfig ?? {}) as Record<string, unknown>;
   const paperclipApiUrl =
     cfgString(rawConfig.paperclipApiUrl) ||
     (await resolveHermesContainerApiUrl());

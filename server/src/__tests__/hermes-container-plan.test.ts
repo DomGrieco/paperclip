@@ -92,6 +92,8 @@ describe("buildHermesContainerLaunchPlan", () => {
           PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/instructions.md",
           PAPERCLIP_API_HELPER_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/runtime/paperclip-api",
           PAPERCLIP_SHARED_CONTEXT_PATH: "/tmp/paperclip/workspaces/dmg-1/.paperclip/context/shared-context.json",
+          PAPERCLIP_HERMES_MANAGED_RUNTIME_ROOT: "/tmp/paperclip/runtime-cache/hermes/channels/stable/installs/current",
+          PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND: "/tmp/paperclip/runtime-cache/hermes/channels/stable/installs/current/venv/bin/hermes",
           PAPERCLIP_API_KEY: "secret-token",
         },
       },
@@ -107,7 +109,7 @@ describe("buildHermesContainerLaunchPlan", () => {
       isolationBoundary: "container_process",
     });
     expect(plan.image).toBe("paperclip/hermes-worker:dev");
-    expect(plan.command).toEqual(["hermes"]);
+    expect(plan.command).toEqual(["/paperclip/runtime/hermes-managed/venv/bin/hermes"]);
     expect(plan.workingDir).toBe("/workspace");
     expect(plan.workspacePath).toBe("/workspace");
     expect(plan.agentHomePath).toBe("/home/hermes/.hermes");
@@ -134,6 +136,12 @@ describe("buildHermesContainerLaunchPlan", () => {
           containerPath: "/workspace/.paperclip/runtime",
           readOnly: true,
         }),
+        expect.objectContaining({
+          kind: "managed_runtime",
+          hostPath: "/tmp/paperclip/runtime-cache/hermes/channels/stable/installs/current",
+          containerPath: "/paperclip/runtime/hermes-managed",
+          readOnly: true,
+        }),
       ]),
     );
     expect(plan.env).toEqual(
@@ -142,6 +150,16 @@ describe("buildHermesContainerLaunchPlan", () => {
           name: "HERMES_HOME",
           value: "/home/hermes/.hermes",
           source: "worker_home",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_HERMES_MANAGED_RUNTIME_ROOT",
+          value: "/paperclip/runtime/hermes-managed",
+          source: "managed_runtime",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND",
+          value: "/paperclip/runtime/hermes-managed/venv/bin/hermes",
+          source: "managed_runtime",
         }),
         expect.objectContaining({
           name: "PAPERCLIP_RUNTIME_ROOT",

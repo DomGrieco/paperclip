@@ -129,6 +129,21 @@ async function hermesTestEnvironmentWithResolvedConfig(ctx: {
       : check,
   );
 
+  const managedRuntimeVersion = typeof env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION === "string"
+    ? env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION
+    : null;
+  if (managedRuntimeVersion) {
+    checks.push({
+      level: "info",
+      message: `Paperclip managed Hermes runtime: ${managedRuntimeVersion}`,
+      hint:
+        typeof env.PAPERCLIP_HERMES_MANAGED_RUNTIME_CHANNEL === "string"
+          ? `Channel: ${env.PAPERCLIP_HERMES_MANAGED_RUNTIME_CHANNEL}`
+          : undefined,
+      code: "hermes_managed_runtime_active",
+    });
+  }
+
   const hasErrors = checks.some((check) => check.level === "error");
   const hasWarnings = checks.some((check) => check.level === "warn");
   return {

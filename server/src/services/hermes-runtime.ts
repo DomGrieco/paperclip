@@ -5,6 +5,10 @@ import type { HermesBootstrapImportSummary, RuntimeBundle } from "@paperclipai/s
 import { resolveCompanyHermesHomeDir } from "../home-paths.js";
 import { buildPaperclipApiGovernanceSummary, derivePaperclipApiGovernancePolicy } from "./hermes-governance.js";
 import { importHermesBootstrapFromHome, type ImportedHermesBootstrap } from "./hermes-bootstrap.js";
+import {
+  ensureManagedHermesRuntime,
+  type HermesManagedRuntimeResolution,
+} from "./hermes-managed-runtime.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
 const RUNTIME_NOTE_MARKER = "Paperclip runtime note:";
@@ -534,6 +538,7 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   runtimeBundle: RuntimeBundle | null;
   authToken?: string | null;
   persistedBootstrap?: ImportedHermesBootstrap | null;
+  managedRuntime?: HermesManagedRuntimeResolution | null;
 }): Promise<Record<string, unknown>> {
   const nextConfig: Record<string, unknown> = { ...input.config };
   const env = {
@@ -602,6 +607,36 @@ export async function prepareHermesAdapterConfigForExecution(input: {
         nextConfig.model = defaultModel;
       }
     }
+  }
+
+  const managedRuntime =
+    input.managedRuntime ??
+    (readString(input.config.hermesCommand)
+      ? null
+      : await ensureManagedHermesRuntime({ config: input.config }));
+
+  if (managedRuntime) {
+    nextConfig.hermesCommand = managedRuntime.hermesCommand;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_ROOT = managedRuntime.installRoot;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND = managedRuntime.hermesCommand;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_PYTHON_COMMAND = managedRuntime.pythonCommand;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION = managedRuntime.version;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_CHANNEL = managedRuntime.channel;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_SOURCE = managedRuntime.source;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_UPDATED_AT = managedRuntime.updatedAt;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_CHECKED_AT = managedRuntime.checkedAt;
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_REFRESHED = managedRuntime.refreshed ? "true" : "false";
+    env.PAPERCLIP_HERMES_MANAGED_RUNTIME_METADATA_JSON = JSON.stringify({
+      channel: managedRuntime.channel,
+      source: managedRuntime.source,
+      installRoot: managedRuntime.installRoot,
+      hermesCommand: managedRuntime.hermesCommand,
+      pythonCommand: managedRuntime.pythonCommand,
+      version: managedRuntime.version,
+      checkedAt: managedRuntime.checkedAt,
+      updatedAt: managedRuntime.updatedAt,
+      refreshed: managedRuntime.refreshed,
+    });
   }
 
   if (!input.runtimeBundle) {
