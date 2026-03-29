@@ -333,17 +333,15 @@ export function Layout() {
             </div>
           </div>
         ) : (
-          <div className="flex h-full flex-col shrink-0">
+          <div
+            className={cn(
+              "flex h-full flex-col shrink-0 overflow-hidden transition-[width,opacity] duration-150 ease-out",
+              sidebarOpen ? "w-[312px] opacity-100" : "w-0 opacity-0"
+            )}
+          >
             <div className="flex flex-1 min-h-0">
               <CompanyRail />
-              <div
-                className={cn(
-                  "overflow-hidden transition-[width] duration-100 ease-out",
-                  sidebarOpen ? "w-60" : "w-0"
-                )}
-              >
-                {isInstanceSettingsRoute ? <InstanceSidebar /> : <Sidebar />}
-              </div>
+              {isInstanceSettingsRoute ? <InstanceSidebar /> : <Sidebar />}
             </div>
             <div className="border-t border-r border-border px-3 py-2">
               <div className="flex items-center gap-1">
