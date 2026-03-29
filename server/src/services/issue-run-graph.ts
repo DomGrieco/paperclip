@@ -407,6 +407,7 @@ export function issueRunGraphService(db: Db) {
           repairAttempt: heartbeatRuns.repairAttempt,
           verificationVerdict: heartbeatRuns.verificationVerdict,
           runnerSnapshotJson: heartbeatRuns.runnerSnapshotJson,
+          artifactBundleJson: heartbeatRuns.artifactBundleJson,
         })
         .from(heartbeatRuns)
         .where(
@@ -444,6 +445,7 @@ export function issueRunGraphService(db: Db) {
           repairAttempt: run.repairAttempt,
           verificationVerdict: asVerificationVerdict(run.verificationVerdict),
           runnerSnapshotJson: (run.runnerSnapshotJson as IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]) ?? null,
+          artifactBundleJson: (run.artifactBundleJson as IssueOrchestrationSummary["nodes"][number]["artifactBundleJson"]) ?? null,
         })),
       };
     });

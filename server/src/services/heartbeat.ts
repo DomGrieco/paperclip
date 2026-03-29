@@ -2569,6 +2569,12 @@ export function heartbeatService(db: Db) {
           if (verificationOutcome?.verificationVerdict === "repair") {
             await issueRunGraph.scheduleRepairFromVerification(finalizedRun.id);
           }
+          if (finalizedRun.rootRunId) {
+            await issueRunEvidence.synthesizePlannerReview(finalizedRun.rootRunId);
+          }
+        }
+        if (finalizedRun.runType === "worker" && finalizedRun.rootRunId) {
+          await issueRunEvidence.synthesizePlannerReview(finalizedRun.rootRunId);
         }
         const runForEvent = await getRun(finalizedRun.id) ?? finalizedRun;
         await appendRunEvent(runForEvent, seq++, {

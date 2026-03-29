@@ -51,9 +51,16 @@ export interface SwarmPlan {
   subtasks: SwarmSubtask[];
 }
 
+export interface RuntimeBundleSwarmWorkspaceGuard {
+  enforcedMode: "shared_workspace" | "isolated_workspace" | "operator_branch" | "agent_default";
+  warnings: string[];
+  errors: string[];
+}
+
 export interface RuntimeBundleSwarm {
   plan: SwarmPlan | null;
   currentSubtask: SwarmSubtask | null;
+  workspaceGuard?: RuntimeBundleSwarmWorkspaceGuard | null;
 }
 
 export interface RuntimeBundlePolicy {
@@ -295,10 +302,51 @@ export interface OrchestrationArtifactBundleItem {
   metadata?: Record<string, unknown> | null;
 }
 
+export type SwarmReviewerDecision = "accept" | "request_repair" | "reject";
+
+export interface StructuredChildOutputArtifactClaim {
+  kind: string;
+  label?: string | null;
+  detail?: string | null;
+}
+
+export interface StructuredChildOutput {
+  summary: string;
+  status?: "completed" | "blocked" | null;
+  notes?: string[];
+  artifactClaims?: StructuredChildOutputArtifactClaim[];
+}
+
+export interface SwarmReviewerDecisionRecord {
+  workerRunId: string;
+  subtaskId?: string | null;
+  taskKey?: string | null;
+  decision: SwarmReviewerDecision;
+  reasons: string[];
+  summary?: string | null;
+  verificationRunId?: string | null;
+  verificationVerdict?: VerificationVerdict | null;
+  acceptedArtifacts?: OrchestrationArtifactBundleItem[];
+}
+
+export interface SwarmPlannerSynthesis {
+  status: "pending" | "complete";
+  generatedAt: string;
+  summary: string;
+  acceptedChildCount: number;
+  requestRepairChildCount: number;
+  rejectedChildCount: number;
+  acceptedArtifacts: OrchestrationArtifactBundleItem[];
+}
+
 export interface OrchestrationArtifactBundle {
   evaluatorSummary?: string | null;
   verdict?: VerificationVerdict | null;
   artifacts?: OrchestrationArtifactBundleItem[];
+  childOutput?: StructuredChildOutput | null;
+  reviewerDecision?: SwarmReviewerDecisionRecord | null;
+  reviewerDecisions?: SwarmReviewerDecisionRecord[];
+  synthesis?: SwarmPlannerSynthesis | null;
   [key: string]: unknown;
 }
 
@@ -320,6 +368,7 @@ export interface IssueRunGraphSummaryNode {
   repairAttempt: number;
   verificationVerdict: VerificationVerdict | null;
   runnerSnapshotJson?: RuntimeBundleRunner | null;
+  artifactBundleJson?: OrchestrationArtifactBundle | null;
 }
 
 export interface IssueOrchestrationSummary {
