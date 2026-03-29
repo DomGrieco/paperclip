@@ -2,6 +2,7 @@ import type {
   HeartbeatRun,
   HermesContainerLaunchPlan,
   PaperclipSharedContextPacket,
+  RuntimeBundle,
   RuntimeBundleRunner,
 } from "@paperclipai/shared";
 import { redactHomePathUserSegments } from "@paperclipai/adapter-utils";
@@ -62,6 +63,12 @@ function asSharedContextPacket(value: unknown): PaperclipSharedContextPacket | n
   return record as unknown as PaperclipSharedContextPacket;
 }
 
+function asRuntimeBundle(value: unknown): RuntimeBundle | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return record as unknown as RuntimeBundle;
+}
+
 function getRuntimeServices(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null);
@@ -80,15 +87,31 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
   const context = asRecord(run.contextSnapshot);
   const plan = asLaunchPlan(context?.paperclipHermesContainerPlan);
   const sharedContextPacket = asSharedContextPacket(context?.paperclipSharedContextPacket);
+  const runtimeBundle = asRuntimeBundle(context?.paperclipRuntimeBundle);
   const runtimeServices = getRuntimeServices(context?.paperclipRuntimeServices);
+  const swarm = asRecord(runtimeBundle?.swarm ?? null);
+  const currentSubtask = asRecord(swarm?.currentSubtask);
+  const workspaceGuard = asRecord(swarm?.workspaceGuard);
+  const workspaceGuardWarnings = Array.isArray(workspaceGuard?.warnings)
+    ? workspaceGuard.warnings.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const workspaceGuardErrors = Array.isArray(workspaceGuard?.errors)
+    ? workspaceGuard.errors.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const allowedPaths = Array.isArray(currentSubtask?.allowedPaths)
+    ? currentSubtask.allowedPaths.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const forbiddenPaths = Array.isArray(currentSubtask?.forbiddenPaths)
+    ? currentSubtask.forbiddenPaths.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
   const runner =
     plan?.runner ??
     run.runnerSnapshotJson ??
     sharedContextPacket?.runner ??
-    (asRecord(context?.paperclipRuntimeBundle)?.runner as RuntimeBundleRunner | null | undefined) ??
+    runtimeBundle?.runner ??
     null;
 
-  if (!runner && !plan && !sharedContextPacket && runtimeServices.length === 0) {
+  if (!runner && !plan && !sharedContextPacket && !runtimeBundle && runtimeServices.length === 0) {
     return null;
   }
 
@@ -194,6 +217,65 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
               <DetailRow label="Shared Context Path" value={renderPath(sharedContextPacket.provenance.sharedContextPath)} mono />
               <DetailRow label="Verification" value={sharedContextPacket.verification.required ? "Required" : "Optional"} />
             </div>
+          </div>
+        ) : null}
+
+        {currentSubtask || workspaceGuard ? (
+          <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Swarm Workspace Contract</div>
+              {asString(workspaceGuard?.enforcedMode) ? (
+                <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {humanize(asString(workspaceGuard?.enforcedMode) ?? "")}
+                </span>
+              ) : null}
+            </div>
+            {currentSubtask ? (
+              <>
+                <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+                  <DetailRow label="Subtask" value={asString(currentSubtask.title) ?? "—"} />
+                  <DetailRow label="Kind" value={humanize(asString(currentSubtask.kind) ?? "unknown")} />
+                  <DetailRow label="Ownership" value={humanize(asString(currentSubtask.ownershipMode) ?? "exclusive")} />
+                  <DetailRow label="Model Tier" value={humanize(asString(currentSubtask.recommendedModelTier) ?? "unknown")} />
+                  <DetailRow label="Task Key" value={asString(currentSubtask.taskKey) ?? "—"} mono />
+                  <DetailRow label="Allowed Paths" value={String(allowedPaths.length)} />
+                  <DetailRow label="Forbidden Paths" value={String(forbiddenPaths.length)} />
+                  <DetailRow label="Acceptance Checks" value={String(Array.isArray(currentSubtask.acceptanceChecks) ? currentSubtask.acceptanceChecks.length : 0)} />
+                </div>
+                {(allowedPaths.length > 0 || forbiddenPaths.length > 0) ? (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border border-border/60 bg-background/50 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Allowed Paths</div>
+                      <div className="mt-1 space-y-1 text-xs text-foreground font-mono break-all">
+                        {allowedPaths.length > 0 ? allowedPaths.map((value) => <div key={`allowed-${value}`}>{value}</div>) : <div>—</div>}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border/60 bg-background/50 px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Forbidden Paths</div>
+                      <div className="mt-1 space-y-1 text-xs text-foreground font-mono break-all">
+                        {forbiddenPaths.length > 0 ? forbiddenPaths.map((value) => <div key={`forbidden-${value}`}>{value}</div>) : <div>—</div>}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {(workspaceGuardWarnings.length > 0 || workspaceGuardErrors.length > 0) ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.08] px-3 py-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">Warnings</div>
+                  <div className="mt-1 space-y-1 text-xs text-amber-900 dark:text-amber-100">
+                    {workspaceGuardWarnings.length > 0 ? workspaceGuardWarnings.map((value) => <div key={`warning-${value}`}>{value}</div>) : <div>None</div>}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-rose-500/20 bg-rose-500/[0.08] px-3 py-2">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-rose-700 dark:text-rose-300">Errors</div>
+                  <div className="mt-1 space-y-1 text-xs text-rose-900 dark:text-rose-100">
+                    {workspaceGuardErrors.length > 0 ? workspaceGuardErrors.map((value) => <div key={`error-${value}`}>{value}</div>) : <div>None</div>}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

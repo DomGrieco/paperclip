@@ -153,6 +153,90 @@ const run: HeartbeatRun = {
         sharedContextPath: "/workspace/.paperclip/context/shared-context.json",
       },
     },
+    paperclipRuntimeBundle: {
+      runtime: "hermes",
+      company: { id: "company-1" },
+      agent: { id: "agent-1", name: "Hermes Worker", adapterType: "hermes_local" },
+      project: { id: "project-1", name: "Project Hermes", executionWorkspacePolicy: null },
+      issue: {
+        id: "issue-1",
+        identifier: "PAP-321",
+        title: "Harden swarm worker workspace visibility",
+        status: "in_progress",
+        priority: "high",
+      },
+      run: {
+        id: "run-1",
+        runType: "worker",
+        rootRunId: "run-1",
+        parentRunId: null,
+        graphDepth: 0,
+        repairAttempt: 0,
+        verificationVerdict: null,
+      },
+      policy: {
+        tddMode: "required",
+        evidencePolicy: "code_ci_evaluator_summary_artifacts",
+        evidencePolicySource: "issue_override",
+        maxRepairAttempts: 3,
+        requiresHumanArtifacts: true,
+      },
+      runner: {
+        target: "hermes_container",
+        provider: "hermes_container",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: false,
+        sandboxed: true,
+        isolationBoundary: "container_process",
+      },
+      verification: {
+        required: true,
+        requiresEvaluatorSummary: true,
+        requiresArtifacts: true,
+        latestVerificationRunId: null,
+        reviewReadyAt: null,
+        runner: {
+          target: "cloud_sandbox",
+          provider: "cloud_sandbox",
+          workspaceStrategyType: "git_worktree",
+          executionMode: "isolated_workspace",
+          browserCapable: true,
+          sandboxed: true,
+          isolationBoundary: "cloud_sandbox",
+        },
+      },
+      swarm: {
+        plan: null,
+        currentSubtask: {
+          id: "subtask-1",
+          kind: "implementation",
+          title: "Patch activity timeline rendering",
+          goal: "Render swarm workspace ownership data for operators.",
+          taskKey: "activity-timeline",
+          allowedPaths: ["ui/src/components/RunRuntimeContractCard.tsx"],
+          forbiddenPaths: ["server/src/services/heartbeat.ts"],
+          ownershipMode: "exclusive",
+          expectedArtifacts: [{ kind: "patch", required: true }],
+          acceptanceChecks: ["Run detail shows swarm workspace warnings"],
+          recommendedModelTier: "balanced",
+        },
+        workspaceGuard: {
+          enforcedMode: "isolated_workspace",
+          warnings: ["Swarm subtask subtask-1 forced into an isolated workspace to avoid parallel edit collisions."],
+          errors: [],
+        },
+      },
+      memory: {
+        snippets: [],
+      },
+      projection: {
+        runtime: "hermes",
+        contextKey: "paperclipRuntimeBundle",
+        envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON",
+        materializationRoot: ".paperclip/runtime",
+      },
+    },
     paperclipRuntimeServices: [
       {
         id: "service-1",
@@ -171,7 +255,7 @@ const run: HeartbeatRun = {
 };
 
 describe("RunRuntimeContractCard", () => {
-  it("renders hermes container launch-plan, shared-context, and runtime-service details", () => {
+  it("renders hermes container launch-plan, shared-context, swarm contract, and runtime-service details", () => {
     const html = renderToStaticMarkup(<RunRuntimeContractCard run={run} />);
 
     expect(html).toContain("Runtime Contract");
@@ -182,6 +266,11 @@ describe("RunRuntimeContractCard", () => {
     expect(html).toContain("Shared Context Packet");
     expect(html).toContain("issue-1");
     expect(html).toContain("Memory Snippets");
+    expect(html).toContain("Swarm Workspace Contract");
+    expect(html).toContain("Patch activity timeline rendering");
+    expect(html).toContain("activity-timeline");
+    expect(html).toContain("ui/src/components/RunRuntimeContractCard.tsx");
+    expect(html).toContain("Swarm subtask subtask-1 forced into an isolated workspace");
     expect(html).toContain("Runtime Services");
     expect(html).toContain("container-12345678");
   });
