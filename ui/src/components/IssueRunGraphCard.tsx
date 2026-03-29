@@ -43,8 +43,49 @@ function runnerTargetLabel(target: NonNullable<IssueOrchestrationSummary["nodes"
       return "Adapter Managed";
     case "cloud_sandbox":
       return "Cloud Sandbox";
+    case "hermes_container":
+      return "Hermes Container";
     default:
       return humanize(target);
+  }
+}
+
+function executionModeLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["executionMode"] | null) {
+  switch (value) {
+    case "isolated_workspace":
+      return "Isolated Workspace";
+    case "shared_workspace":
+      return "Shared Workspace";
+    default:
+      return value ? humanize(value) : "Unknown";
+  }
+}
+
+function workspaceStrategyLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["workspaceStrategyType"] | null) {
+  switch (value) {
+    case "git_worktree":
+      return "Git Worktree";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    case "adapter_managed":
+      return "Adapter Managed";
+    default:
+      return value ? humanize(value) : "Unknown";
+  }
+}
+
+function isolationBoundaryLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["isolationBoundary"]) {
+  switch (value) {
+    case "host_process":
+      return "Host Process";
+    case "adapter_runtime":
+      return "Adapter Runtime";
+    case "container_process":
+      return "Container Process";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    default:
+      return humanize(value);
   }
 }
 
@@ -131,6 +172,19 @@ function IssueSharedContextCard({
               {publication.createdByRunId ? (
                 <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
                   Run {publication.createdByRunId.slice(0, 8)}
+                </span>
+              ) : null}
+              {typeof publication.provenance?.source === "string" && publication.provenance.source.trim().length > 0 ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                  Source {humanize(publication.provenance.source)}
+                </span>
+              ) : null}
+              <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                Freshness {freshnessLabel(publication.freshness)}
+              </span>
+              {publication.confidence !== null ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                  Confidence {Math.round(publication.confidence * 100)}%
                 </span>
               ) : null}
               {publication.tags.map((tag) => (
@@ -272,6 +326,23 @@ export function IssueRunGraphCard({
                       ) : null}
                       {node.parentRunId ? <span>Parent {node.parentRunId.slice(0, 8)}</span> : <span>Root run</span>}
                     </div>
+                    {node.runnerSnapshotJson ? (
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                        {node.runnerSnapshotJson.executionMode ? (
+                          <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                            {executionModeLabel(node.runnerSnapshotJson.executionMode)}
+                          </span>
+                        ) : null}
+                        {node.runnerSnapshotJson.workspaceStrategyType ? (
+                          <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                            {workspaceStrategyLabel(node.runnerSnapshotJson.workspaceStrategyType)}
+                          </span>
+                        ) : null}
+                        <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                          {isolationBoundaryLabel(node.runnerSnapshotJson.isolationBoundary)}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

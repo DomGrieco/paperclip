@@ -73,6 +73,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 1,
       repairAttempt: 1,
       verificationVerdict: null,
+      runnerSnapshotJson: {
+        target: "hermes_container",
+        provider: "hermes_container",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: true,
+        sandboxed: true,
+        isolationBoundary: "container_process",
+      },
     },
     {
       id: "run-verify",
@@ -152,13 +161,21 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Verification");
     expect(html).toContain("Repair 1");
     expect(html).toContain("Local Host");
+    expect(html).toContain("Hermes Container");
     expect(html).toContain("Cloud Sandbox");
     expect(html).toContain("Browser Capable");
+    expect(html).toContain("Isolated Workspace");
+    expect(html).toContain("Git Worktree");
+    expect(html).toContain("Container Process");
+    expect(html).toContain("Host Process");
     expect(html).toContain("/TST/agents/agent-plan/runs/run-plan");
     expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
     expect(html).toContain("Shared Context");
     expect(html).toContain("API auth gotcha");
     expect(html).toContain("Issue Scope");
+    expect(html).toContain("Source Runtime Bundle");
+    expect(html).toContain("Freshness Recent");
+    expect(html).toContain("Confidence 91%");
     expect(html).toContain("#hermes");
   });
 
