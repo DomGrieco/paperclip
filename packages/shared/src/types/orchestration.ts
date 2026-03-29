@@ -195,7 +195,7 @@ export interface HermesBootstrapImportSummary {
 }
 
 export interface HermesContainerMountPlan {
-  kind: "workspace" | "agent_home" | "runtime_bundle" | "shared_auth";
+  kind: "workspace" | "agent_home" | "runtime_bundle" | "shared_auth" | "managed_runtime";
   hostPath: string;
   containerPath: string;
   readOnly: boolean;
@@ -211,6 +211,7 @@ export interface HermesContainerEnvPlan {
     | "resolved_config"
     | "runtime_bundle"
     | "shared_auth"
+    | "managed_runtime"
     | "worker_home";
 }
 

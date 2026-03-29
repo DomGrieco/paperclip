@@ -75,6 +75,19 @@ export function resolveCompanyHermesHomeDir(companyId: string): string {
   );
 }
 
+export function resolveHermesRuntimeCacheRoot(): string {
+  return path.resolve(resolvePaperclipInstanceRoot(), "runtime-cache", "hermes");
+}
+
+export function resolveHermesRuntimeChannelRoot(channel: string): string {
+  const normalized = sanitizeFriendlyPathSegment(channel, "stable");
+  return path.resolve(resolveHermesRuntimeCacheRoot(), "channels", normalized);
+}
+
+export function resolveHermesRuntimeChannelMetadataPath(channel: string): string {
+  return path.resolve(resolveHermesRuntimeChannelRoot(channel), "metadata.json");
+}
+
 function sanitizeFriendlyPathSegment(value: string | null | undefined, fallback = "_default"): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return fallback;

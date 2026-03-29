@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeBundle } from "@paperclipai/shared";
+import type { HermesManagedRuntimeResolution } from "../services/hermes-managed-runtime.js";
 import { prepareHermesAdapterConfigForExecution } from "../services/hermes-runtime.js";
 
 const tempDirs: string[] = [];
@@ -88,6 +89,23 @@ function makeBundle(overrides: Partial<RuntimeBundle> = {}): RuntimeBundle {
   return { ...bundle, ...overrides };
 }
 
+function makeManagedRuntime(cwd: string, overrides: Partial<HermesManagedRuntimeResolution> = {}): HermesManagedRuntimeResolution {
+  return {
+    schemaVersion: "v1",
+    channel: "stable",
+    source: "git+https://github.com/NousResearch/hermes-agent.git",
+    installRoot: path.join(cwd, ".paperclip", "managed-hermes-runtime"),
+    hermesCommand: path.join(cwd, ".paperclip", "managed-hermes-runtime", "venv", "bin", "hermes"),
+    pythonCommand: path.join(cwd, ".paperclip", "managed-hermes-runtime", "venv", "bin", "python"),
+    version: "Hermes Agent v9.9.9",
+    checkedAt: "2026-03-29T23:00:00.000Z",
+    updatedAt: "2026-03-29T23:00:00.000Z",
+    refreshIntervalMinutes: 360,
+    refreshed: false,
+    ...overrides,
+  };
+}
+
 describe("prepareHermesAdapterConfigForExecution", () => {
   it("injects Paperclip auth/runtime env and materializes runtime files for Hermes", async () => {
     const cwd = await makeTempDir();
@@ -120,6 +138,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-123",
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string>;
@@ -135,6 +154,10 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
     expect(env.HERMES_HOME).toContain(path.join("company-hermes-home"));
     expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
+    expect(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION).toBe("Hermes Agent v9.9.9");
+    expect(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_CHANNEL).toBe("stable");
+    expect(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND).toContain(path.join("managed-hermes-runtime", "venv", "bin", "hermes"));
+    expect(nextConfig.hermesCommand).toBe(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_HERMES_COMMAND);
 
     const bundleJson = await fs.readFile(env.PAPERCLIP_RUNTIME_BUNDLE_PATH, "utf8");
     expect(bundleJson).toContain('"runtime": "hermes"');
@@ -221,6 +244,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: null,
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string | undefined>;
@@ -291,6 +315,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: null,
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string | undefined>;
@@ -349,6 +374,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
       authToken: "jwt-token-456",
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string>;
@@ -403,6 +429,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         },
       }),
       authToken: "jwt-token-789",
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const promptTemplate = String(nextConfig.promptTemplate);
@@ -456,6 +483,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         },
       }),
       authToken: "jwt-token-999",
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string>;
@@ -501,6 +529,7 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: null,
       authToken: null,
+      managedRuntime: makeManagedRuntime(cwd),
     });
 
     const env = nextConfig.env as Record<string, string | undefined>;
