@@ -3,6 +3,7 @@ import path from "node:path";
 import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
 import type { HermesBootstrapImportSummary, RuntimeBundle } from "@paperclipai/shared";
 import { resolveCompanyHermesHomeDir } from "../home-paths.js";
+import { buildPaperclipApiGovernanceSummary, derivePaperclipApiGovernancePolicy } from "./hermes-governance.js";
 import { importHermesBootstrapFromHome, type ImportedHermesBootstrap } from "./hermes-bootstrap.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 
@@ -49,9 +50,14 @@ ${RUNTIME_NOTE_MARKER}
 - If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
+- Limit your initial file reads to \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\`. Do not expand into \`policy.json\`, \`runner.json\`, \`verification.json\`, broad file discovery, or repeated re-reads unless the task explicitly requires it or those files point you there.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
 - If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
+- If \`$PAPERCLIP_API_POLICY_SUMMARY\` is set, treat it as the exact helper allowlist contract for this run. Do not call helper endpoints outside that contract.
+- In an already-running assigned issue execution, do not call \`/api/agents/{{agentId}}/wakeup\` to \"start\" yourself again unless the task explicitly asks you to validate wakeup semantics.
+- Do not try to prove that prohibition by attempting the wakeup call anyway. Treat \`/api/agents/{{agentId}}/wakeup\`, top-level \`/api/runs\`, bare \`/api\`, and other broad discovery endpoints as forbidden unless the task explicitly requires them.
+- Avoid repeated status polling of the same issue/agent/run endpoints. Fetch what you need once, act, then do at most one final confirmation read.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 Your Paperclip identity:
@@ -116,11 +122,16 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
 - Only fall back to raw \`curl\` if the helper is unavailable or clearly insufficient.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
 - If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
-- If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools.
+- If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
+- Limit your initial file reads to \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\`. Do not expand into \`policy.json\`, \`runner.json\`, \`verification.json\`, broad file discovery, or repeated re-reads unless the task explicitly requires it or those files point you there.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
 - If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
+- If \`$PAPERCLIP_API_POLICY_SUMMARY\` is set, treat it as the exact helper allowlist contract for this run. Do not call helper endpoints outside that contract.
+- In an already-running assigned issue execution, do not call \`/api/agents/{{agentId}}/wakeup\` to \"start\" yourself again unless the task explicitly asks you to validate wakeup semantics.
+- Do not try to prove that prohibition by attempting the wakeup call anyway. Treat \`/api/agents/{{agentId}}/wakeup\`, top-level \`/api/runs\`, bare \`/api\`, and other broad discovery endpoints as forbidden unless the task explicitly requires them.
+- Avoid repeated status polling of the same issue/agent/run endpoints. Fetch what you need once, act, then do at most one final confirmation read.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 ${existingPromptTemplate}
@@ -163,12 +174,130 @@ async function materializePaperclipApiHelper(runtimeRoot: string): Promise<strin
   const helperSource = `#!/usr/bin/env python3
 import json
 import os
+import pathlib
+import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
+def load_state(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_state(path: str, state: dict) -> None:
+    try:
+        pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+    except Exception:
+        pass
+
+
+def normalize_target(api_base: str, target: str) -> tuple[str, str]:
+    url = target if target.startswith("http://") or target.startswith("https://") else f"{api_base}{target}"
+    parsed = urllib.parse.urlparse(url)
+    path = parsed.path or "/"
+    query = f"?{parsed.query}" if parsed.query else ""
+    return url, f"{path}{query}"
+
+
+def load_policy() -> dict:
+    raw = os.environ.get("PAPERCLIP_API_POLICY_JSON") or ""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def guard_policy_request(method: str, path_only: str, state_path: str) -> str | None:
+    policy = load_policy()
+    if not policy:
+        return None
+
+    allowed = policy.get("allowedRequests")
+    if not isinstance(allowed, list):
+        return None
+
+    matched_rule = None
+    matched_key = None
+    for rule in allowed:
+        if not isinstance(rule, dict):
+            continue
+        rule_method = str(rule.get("method") or "").upper()
+        pattern = str(rule.get("pathPattern") or "")
+        if rule_method != method or not pattern:
+            continue
+        try:
+            if re.fullmatch(pattern, path_only):
+                matched_rule = rule
+                matched_key = f"{rule_method} {pattern}"
+                break
+        except re.error:
+            continue
+
+    if matched_rule is None or matched_key is None:
+        return f"request not allowed by governed helper policy: {method} {path_only}"
+
+    state = load_state(state_path)
+    policy_counts = state.get("policy_counts")
+    if not isinstance(policy_counts, dict):
+        policy_counts = {}
+        state["policy_counts"] = policy_counts
+
+    count = int(policy_counts.get(matched_key) or 0) + 1
+    policy_counts[matched_key] = count
+    save_state(state_path, state)
+
+    max_calls = int(matched_rule.get("maxCalls") or 0)
+    if max_calls > 0 and count > max_calls:
+        return f"request exceeds governed helper policy budget: {method} {path_only}"
+    return None
+
+
+def guard_request(method: str, normalized_target: str, state_path: str) -> str | None:
+    issue_id = os.environ.get("PAPERCLIP_ISSUE_ID") or ""
+    if not issue_id:
+        return None
+
+    path_only = normalized_target.split("?", 1)[0]
+    policy_error = guard_policy_request(method, path_only, state_path)
+    if policy_error:
+        return policy_error
+    if path_only == "/api" or path_only == "/api/runs" or path_only.startswith("/api/runs/"):
+        return f"forbidden broad discovery endpoint during assigned issue execution: {path_only}"
+    if path_only.startswith("/api/agents/") and path_only.endswith("/wakeup"):
+        return f"forbidden wakeup endpoint during assigned issue execution: {path_only}"
+    if path_only.startswith(f"/api/issues/{issue_id}/") and method == "POST" and not path_only.endswith("/comments"):
+        return f"forbidden issue-subresource POST during assigned issue execution: {path_only}"
+
+    state = load_state(state_path)
+    if method == "GET":
+        counts = state.get("get_counts")
+        if not isinstance(counts, dict):
+            counts = {}
+            state["get_counts"] = counts
+        count = int(counts.get(normalized_target) or 0) + 1
+        counts[normalized_target] = count
+        save_state(state_path, state)
+        if count > 2:
+            return f"forbidden repeated GET during assigned issue execution: {normalized_target}"
+    return None
+
+
 def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] in {"-h", "--help"}:
+        print("usage: paperclip-api <get|post|patch|put|delete> <path-or-url> [--json <json>]")
+        return 0
     if len(sys.argv) < 3:
         print("usage: paperclip-api <get|post|patch|put|delete> <path-or-url> [--json <json>]", file=sys.stderr)
         return 2
@@ -187,9 +316,15 @@ def main() -> int:
             return 2
         payload = args[1]
 
-    url = target if target.startswith("http://") or target.startswith("https://") else f"{api_base}{target}"
+    url, normalized_target = normalize_target(api_base, target)
     if not url.startswith("http://") and not url.startswith("https://"):
         print("PAPERCLIP_API_URL is not configured and target is not absolute", file=sys.stderr)
+        return 2
+
+    state_path = os.environ.get("PAPERCLIP_API_HELPER_STATE_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".paperclip-api-state.json")
+    guard_error = guard_request(method, normalized_target, state_path)
+    if guard_error:
+        print(guard_error, file=sys.stderr)
         return 2
 
     headers = {"Accept": "application/json"}
@@ -475,8 +610,26 @@ export async function prepareHermesAdapterConfigForExecution(input: {
 
   const helperRuntimeRoot = path.join(input.cwd, PAPERCLIP_RUNTIME_ROOT);
   env.PAPERCLIP_API_HELPER_PATH = await materializePaperclipApiHelper(helperRuntimeRoot);
+  env.PAPERCLIP_API_HELPER_STATE_PATH = path.join(helperRuntimeRoot, ".paperclip-api-state.json");
 
   if (input.runtimeBundle) {
+    const issueDescriptionSnippet = Array.isArray(input.runtimeBundle.memory?.snippets)
+      ? input.runtimeBundle.memory.snippets.find((snippet) => snippet?.source === "issue.description")
+      : null;
+    const governancePolicy = derivePaperclipApiGovernancePolicy({
+      taskId: readString(input.runtimeBundle.issue?.id),
+      agentId: readString(input.runtimeBundle.agent?.id),
+      taskTitle: readString(input.runtimeBundle.issue?.title),
+      taskBody: typeof issueDescriptionSnippet?.content === "string" ? issueDescriptionSnippet.content : null,
+    });
+    const governanceSummary = buildPaperclipApiGovernanceSummary(governancePolicy);
+    if (governancePolicy) {
+      env.PAPERCLIP_API_POLICY_JSON = JSON.stringify(governancePolicy);
+    }
+    if (governanceSummary) {
+      env.PAPERCLIP_API_POLICY_SUMMARY = governanceSummary;
+    }
+
     const materialized = await materializeRuntimeBundleWorkspace({
       cwd: input.cwd,
       materializationRoot: input.runtimeBundle.projection.materializationRoot,
@@ -489,6 +642,7 @@ export async function prepareHermesAdapterConfigForExecution(input: {
       env.PAPERCLIP_RUNTIME_BUNDLE_JSON = JSON.stringify(input.runtimeBundle);
       env.PAPERCLIP_MEMORY_RECALL_JSON = JSON.stringify(input.runtimeBundle.memory);
       env.PAPERCLIP_API_HELPER_PATH = await materializePaperclipApiHelper(materialized.root);
+      env.PAPERCLIP_API_HELPER_STATE_PATH = path.join(materialized.root, ".paperclip-api-state.json");
 
       const sharedContextPath = path.join(path.dirname(materialized.root), "context", SHARED_CONTEXT_FILE);
       const sharedContext = buildPaperclipSharedContextPacket({

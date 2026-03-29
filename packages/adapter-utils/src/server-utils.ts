@@ -156,7 +156,8 @@ function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): st
   const lines = [
     `# Paperclip ${runtime} runtime projection`,
     "",
-    "Start by reading the canonical JSON files in this directory, especially bundle.json, policy.json, runner.json, and verification.json.",
+    "Start by reading instructions.md and bundle.json first, then consult shared-context.json when it is available.",
+    "Do not expand that initial read into policy.json, runner.json, or verification.json unless the assigned task explicitly requires it or bundle.json points you there.",
     "Do not spend the run broadly spelunking the environment after those files are confirmed readable.",
     "Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.",
     "",

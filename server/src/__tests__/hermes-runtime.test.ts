@@ -17,8 +17,8 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-function makeBundle(): RuntimeBundle {
-  return {
+function makeBundle(overrides: Partial<RuntimeBundle> = {}): RuntimeBundle {
+  const bundle: RuntimeBundle = {
     runtime: "hermes",
     company: { id: "company-1" },
     agent: { id: "agent-1", name: "Hermes Engineer", adapterType: "hermes_local" },
@@ -85,6 +85,7 @@ function makeBundle(): RuntimeBundle {
       materializationRoot: ".paperclip/runtime",
     },
   };
+  return { ...bundle, ...overrides };
 }
 
 describe("prepareHermesAdapterConfigForExecution", () => {
@@ -140,6 +141,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
 
     const instructions = await fs.readFile(env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH, "utf8");
     expect(instructions).toContain("Paperclip hermes runtime projection");
+    expect(instructions).toContain("Start by reading instructions.md and bundle.json first");
+    expect(instructions).toContain("Do not expand that initial read into policy.json, runner.json, or verification.json");
     expect(instructions).toContain("Do not spend the run broadly spelunking the environment");
     expect(instructions).toContain("Prefer the narrowest path that completes the assigned work");
 
@@ -186,6 +189,9 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_HELPER_PATH");
     expect(String(nextConfig.promptTemplate)).toContain("Do not re-export or rewrite `PAPERCLIP_API_URL`");
     expect(String(nextConfig.promptTemplate)).toContain("Treat raw `curl` as last-resort debugging only");
+    expect(String(nextConfig.promptTemplate)).toContain("/api/agents/{{agentId}}/wakeup");
+    expect(String(nextConfig.promptTemplate)).toContain("Do not expand into `policy.json`, `runner.json`, `verification.json`");
+    expect(String(nextConfig.promptTemplate)).toContain("top-level `/api/runs`, bare `/api`, and other broad discovery endpoints as forbidden");
     expect(String(nextConfig.promptTemplate)).toContain("do not broadly spelunk the environment");
     expect(String(nextConfig.promptTemplate)).toContain("Do not pivot into host/IP probing, ad-hoc Python HTTP scripts");
     expect(String(nextConfig.promptTemplate)).toContain("finish decisively");
@@ -407,6 +413,73 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(promptTemplate).toContain("patch /api/issues/{{taskId}} --json '{\"status\":\"done\"}'");
     expect(promptTemplate).toContain("{{#noTask}}");
     expect(promptTemplate).toContain("Check your assigned todo issues");
+  });
+
+  it("materializes a governed helper policy for validation-shaped issue runs", async () => {
+    const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        env: {
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource,
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        issue: {
+          id: "issue-77",
+          identifier: "PAP-77",
+          title: "Validate planner-grade issue path",
+          status: "in_progress",
+          priority: "high",
+        },
+        memory: {
+          snippets: [
+            {
+              scope: "issue",
+              source: "issue.description",
+              sourceId: "issue-77",
+              content:
+                "Acceptance criteria: do not call /api/agents/{agentId}/wakeup, do not call top-level /api/runs, keep API reads narrow, and leave pass/fail evidence.",
+              freshness: "static",
+              updatedAt: "2026-03-24T00:00:00.000Z",
+              rank: 1,
+            },
+          ],
+        },
+      }),
+      authToken: "jwt-token-999",
+    });
+
+    const env = nextConfig.env as Record<string, string>;
+    expect(env.PAPERCLIP_API_POLICY_JSON).toBeTruthy();
+    expect(env.PAPERCLIP_API_POLICY_SUMMARY).toContain("mode=issue_validation_narrow");
+    expect(env.PAPERCLIP_API_POLICY_SUMMARY).toContain("GET /api/issues/issue-77 (max 2)");
+
+    const policy = JSON.parse(env.PAPERCLIP_API_POLICY_JSON) as {
+      mode: string;
+      allowedRequests: Array<{ method: string; summaryPath: string; maxCalls: number }>;
+    };
+    expect(policy.mode).toBe("issue_validation_narrow");
+    expect(policy.allowedRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ method: "GET", summaryPath: "/api/issues/issue-77", maxCalls: 2 }),
+        expect.objectContaining({ method: "POST", summaryPath: "/api/issues/issue-77/comments", maxCalls: 1 }),
+        expect.objectContaining({ method: "PATCH", summaryPath: "/api/issues/issue-77", maxCalls: 1 }),
+      ]),
+    );
+
+    const helper = await fs.readFile(env.PAPERCLIP_API_HELPER_PATH, "utf8");
+    expect(helper).toContain("request not allowed by governed helper policy");
+    expect(helper).toContain("request exceeds governed helper policy budget");
+    expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_POLICY_SUMMARY");
   });
 
   it("clears stale runtime bundle artifacts when a heartbeat run has no runtime bundle", async () => {

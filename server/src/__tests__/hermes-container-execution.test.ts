@@ -75,5 +75,39 @@ describe("buildPrompt", () => {
     expect(prompt).not.toContain("API Base: http://paperclip-server-dev:3100/api");
     expect(prompt).toContain("Do not re-export or rewrite `PAPERCLIP_API_URL`");
     expect(prompt).toContain("Do not pivot into host/IP probing, ad-hoc Python HTTP scripts");
+    expect(prompt).toContain("/api/agents/{agentId}/wakeup");
+    expect(prompt).toContain("Do not expand that initial read into `policy.json`, `runner.json`, `verification.json`");
+    expect(prompt).toContain("top-level `/api/runs`, bare `/api`, and other broad discovery endpoints as forbidden");
+  });
+
+  it("appends a governed api contract for validation-shaped issue runs", () => {
+    const prompt = buildPrompt(
+      buildContext({
+        context: {
+          paperclipRuntimeBundle: {
+            issue: {
+              id: "issue-99",
+              title: "Validate the planner path",
+            },
+            memory: {
+              snippets: [
+                {
+                  source: "issue.description",
+                  content:
+                    "Acceptance criteria: do not call /api/agents/{agentId}/wakeup, do not call top-level /api/runs, keep API reads narrow, and leave pass/fail evidence.",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      {},
+    );
+
+    expect(prompt).toContain("## Governed API contract");
+    expect(prompt).toContain("mode=issue_validation_narrow");
+    expect(prompt).toContain("GET /api/issues/issue-99 (max 2)");
+    expect(prompt).toContain("POST /api/issues/issue-99/comments (max 1)");
+    expect(prompt).toContain("PATCH /api/issues/issue-99 (max 1)");
   });
 });

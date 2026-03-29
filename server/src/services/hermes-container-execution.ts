@@ -1,6 +1,7 @@
 import * as http from "node:http";
 import { buildPaperclipEnv, renderTemplate } from "@paperclipai/adapter-utils/server-utils";
 import type { AdapterExecutionContext, AdapterExecutionResult, UsageSummary } from "../adapters/types.js";
+import { buildPaperclipApiGovernanceSummary, derivePaperclipApiGovernancePolicy } from "./hermes-governance.js";
 import { resolveHermesContainerApiUrl } from "./hermes-container-launcher.js";
 
 const HERMES_CLI = "hermes";
@@ -36,9 +37,14 @@ Paperclip runtime rules:
 - \`$PAPERCLIP_API_URL\` points at the Paperclip server root. Keep helper targets as \`/api/...\` paths instead of appending another base prefix yourself.
 - Treat raw \`curl\` as last-resort debugging only.
 - Read \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\` first when they are available.
+- Do not expand that initial read into \`policy.json\`, \`runner.json\`, \`verification.json\`, broad file discovery, or repeated re-reads unless the task explicitly requires it or the first three files point you there.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
 - If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
+- If \`$PAPERCLIP_API_POLICY_SUMMARY\` is set, treat it as the exact helper allowlist contract for this run. Do not call helper endpoints outside that contract.
+- In an already-running assigned issue execution, do not call \`/api/agents/{agentId}/wakeup\` to "start" yourself again unless the task explicitly asks you to validate wakeup semantics.
+- Do not try to prove that prohibition by attempting the wakeup call anyway. Treat \`/api/agents/{agentId}/wakeup\`, top-level \`/api/runs\`, bare \`/api\`, and other broad discovery endpoints as forbidden unless the task explicitly requires them.
+- Avoid repeated status polling of the same issue/agent/run endpoints. Fetch what you need once, act, then do at most one final confirmation read.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 Your Paperclip identity:
@@ -124,6 +130,13 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string,
   const projectName = cfgString(ctx.config?.projectName) || cfgString(runtimeProject?.name) || "";
   const paperclipApiUrl =
     cfgString(config.paperclipApiUrl) || process.env.PAPERCLIP_API_URL || "http://127.0.0.1:3100";
+  const apiGovernancePolicy = derivePaperclipApiGovernancePolicy({
+    taskId: taskId || null,
+    agentId: ctx.agent?.id || null,
+    taskTitle: taskTitle || null,
+    taskBody: taskBody || null,
+  });
+  const apiPolicySummary = buildPaperclipApiGovernanceSummary(apiGovernancePolicy);
   const vars = {
     agentId: ctx.agent?.id || "",
     agentName,
@@ -139,7 +152,9 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string,
   let rendered = template;
   rendered = rendered.replace(/\{\{#taskId\}\}([\s\S]*?)\{\{\/taskId\}\}/g, taskId ? "$1" : "");
   rendered = rendered.replace(/\{\{#noTask\}\}([\s\S]*?)\{\{\/noTask\}\}/g, taskId ? "" : "$1");
-  return renderTemplate(rendered, vars);
+  const renderedPrompt = renderTemplate(rendered, vars);
+  if (!apiPolicySummary) return renderedPrompt;
+  return `${renderedPrompt}\n\n## Governed API contract\n${apiPolicySummary}\nAny helper call outside this contract will be rejected before it reaches the Paperclip API.`;
 }
 
 function parseHermesOutput(stdout: string, stderr: string): {
