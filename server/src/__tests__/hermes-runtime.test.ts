@@ -184,8 +184,10 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(String(nextConfig.promptTemplate)).toContain("Paperclip runtime note:");
     expect(String(nextConfig.promptTemplate)).toContain("shared context packet");
     expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_HELPER_PATH");
+    expect(String(nextConfig.promptTemplate)).toContain("Do not re-export or rewrite `PAPERCLIP_API_URL`");
     expect(String(nextConfig.promptTemplate)).toContain("Treat raw `curl` as last-resort debugging only");
     expect(String(nextConfig.promptTemplate)).toContain("do not broadly spelunk the environment");
+    expect(String(nextConfig.promptTemplate)).toContain("Do not pivot into host/IP probing, ad-hoc Python HTTP scripts");
     expect(String(nextConfig.promptTemplate)).toContain("finish decisively");
     expect(nextConfig.provider).toBe("openai-codex");
     expect(nextConfig.model).toBe("gpt-5.3-codex");

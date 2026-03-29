@@ -67,4 +67,13 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("Check your assigned todo issues");
     expect(prompt).not.toContain("## Assigned Task");
   });
+
+  it("keeps the Paperclip API base at the server root and warns against overriding helper env", () => {
+    const prompt = buildPrompt(buildContext(), { paperclipApiUrl: "http://paperclip-server-dev:3100" });
+
+    expect(prompt).toContain("API Base: http://paperclip-server-dev:3100");
+    expect(prompt).not.toContain("API Base: http://paperclip-server-dev:3100/api");
+    expect(prompt).toContain("Do not re-export or rewrite `PAPERCLIP_API_URL`");
+    expect(prompt).toContain("Do not pivot into host/IP probing, ad-hoc Python HTTP scripts");
+  });
 });

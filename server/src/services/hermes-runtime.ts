@@ -38,17 +38,20 @@ const DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE = `You are "{{agentName}}", a Her
 
 ${RUNTIME_NOTE_MARKER}
 - For normal Paperclip API calls, use \`$PAPERCLIP_API_HELPER_PATH\` instead of raw \`curl\`. The helper automatically attaches auth headers and prints JSON/text responses.
+- \`$PAPERCLIP_API_HELPER_PATH\` already uses the configured \`$PAPERCLIP_API_URL\`. Do not re-export or rewrite \`PAPERCLIP_API_URL\` before helper calls.
+- \`$PAPERCLIP_API_URL\` points at the Paperclip server root. Keep helper targets as \`/api/...\` paths instead of appending another base prefix yourself.
 - Treat raw \`curl\` as last-resort debugging only. Do not use raw \`curl\` for routine issue lookup, status updates, or heartbeat bookkeeping when the helper exists.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
 - Helper examples:
   - \`$PAPERCLIP_API_HELPER_PATH get /api/health\`
   - \`$PAPERCLIP_API_HELPER_PATH get "/api/companies/{{companyId}}/issues?assigneeAgentId={{agentId}}&status=todo"\`
   - \`$PAPERCLIP_API_HELPER_PATH patch /api/issues/{{taskId}} --json '{"status":"done"}'\`
-- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
+- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
+- If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 Your Paperclip identity:
@@ -108,13 +111,16 @@ function buildPromptTemplate(existingPromptTemplate: string | null): string {
   }
   return `${RUNTIME_NOTE_MARKER}
 - Use \`$PAPERCLIP_API_HELPER_PATH\` for Paperclip API calls whenever it is available. It automatically attaches auth headers and prints JSON/text responses.
+- \`$PAPERCLIP_API_HELPER_PATH\` already uses the configured \`$PAPERCLIP_API_URL\`. Do not re-export or rewrite \`PAPERCLIP_API_URL\` before helper calls.
+- \`$PAPERCLIP_API_URL\` points at the Paperclip server root. Keep helper targets as \`/api/...\` paths instead of appending another base prefix yourself.
 - Only fall back to raw \`curl\` if the helper is unavailable or clearly insufficient.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
-- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPERCLIP_API_KEY"\` on every Paperclip API request.
+- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
+- If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 ${existingPromptTemplate}

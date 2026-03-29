@@ -32,10 +32,13 @@ const DEFAULT_PROMPT_TEMPLATE = `You are "{{agentName}}", an AI agent employee i
 
 Paperclip runtime rules:
 - Use \`$PAPERCLIP_API_HELPER_PATH\` for normal Paperclip API calls whenever it is available. It automatically attaches auth headers and prints JSON/text responses.
+- \`$PAPERCLIP_API_HELPER_PATH\` already uses the configured \`$PAPERCLIP_API_URL\`. Do not re-export or rewrite \`PAPERCLIP_API_URL\` before helper calls.
+- \`$PAPERCLIP_API_URL\` points at the Paperclip server root. Keep helper targets as \`/api/...\` paths instead of appending another base prefix yourself.
 - Treat raw \`curl\` as last-resort debugging only.
 - Read \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\` first when they are available.
 - After those files are readable, do not broadly spelunk the environment. Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.
 - Do not probe unrelated Paperclip routes or \`/api/health\` unless a specific helper/API call fails and you are gathering evidence for that failure.
+- If a helper call fails, record that exact failure and stop to reassess. Do not pivot into host/IP probing, ad-hoc Python HTTP scripts, or broad environment scans.
 - Aim to finish decisively: restate the objective, perform the smallest useful set of API reads/writes, leave evidence, and stop once the task is complete.
 
 Your Paperclip identity:
@@ -119,10 +122,8 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string,
   const agentName = ctx.agent?.name || "Hermes Agent";
   const companyName = cfgString(ctx.config?.companyName) || "";
   const projectName = cfgString(ctx.config?.projectName) || cfgString(runtimeProject?.name) || "";
-  let paperclipApiUrl = cfgString(config.paperclipApiUrl) || process.env.PAPERCLIP_API_URL || "http://127.0.0.1:3100/api";
-  if (!paperclipApiUrl.endsWith("/api")) {
-    paperclipApiUrl = paperclipApiUrl.replace(/\/+$/, "") + "/api";
-  }
+  const paperclipApiUrl =
+    cfgString(config.paperclipApiUrl) || process.env.PAPERCLIP_API_URL || "http://127.0.0.1:3100";
   const vars = {
     agentId: ctx.agent?.id || "",
     agentName,

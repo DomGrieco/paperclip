@@ -47,7 +47,7 @@ services:
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
       PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
-      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server:3100"
+      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server-1:3100"
       PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
     volumes:
       - paperclip-data:/paperclip
@@ -80,7 +80,7 @@ services:
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
       PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
-      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server-dev:3100"
+      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server-dev-1:3100"
       PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
     user: root
     ports:
