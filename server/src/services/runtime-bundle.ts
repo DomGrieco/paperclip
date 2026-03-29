@@ -63,6 +63,15 @@ function resolveCurrentSwarmSubtask(input: {
   return input.swarmPlan.subtasks.find((subtask) => subtask.id === subtaskId || subtask.taskKey === subtaskId) ?? null;
 }
 
+function readSwarmWorkspaceGuard(candidate: unknown): { enforcedMode: string; warnings: string[]; errors: string[] } | null {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  const rec = candidate as Record<string, unknown>;
+  const warnings = Array.isArray(rec.warnings) ? rec.warnings.filter((value): value is string => typeof value === "string") : [];
+  const errors = Array.isArray(rec.errors) ? rec.errors.filter((value): value is string => typeof value === "string") : [];
+  const enforcedMode = typeof rec.enforcedMode === "string" && rec.enforcedMode.length > 0 ? rec.enforcedMode : "shared_workspace";
+  return { enforcedMode, warnings, errors };
+}
+
 export function resolveRuntimeBundleTarget(adapterType: string | null | undefined): RuntimeBundleTarget | null {
   if (adapterType === "codex_local") return "codex";
   if (adapterType === "cursor") return "cursor";
@@ -176,6 +185,7 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
     swarmPlan,
     currentRunContext: (run?.contextSnapshot ?? null) as Record<string, unknown> | null,
   });
+  const swarmWorkspaceGuard = readSwarmWorkspaceGuard(run?.contextSnapshot?.swarmWorkspaceGuard ?? null);
 
   const policySnapshot = (run?.policySnapshotJson ?? null) as OrchestrationPolicySnapshot | null;
   const maxRepairAttempts = resolveMaxRepairAttempts(policySnapshot);
@@ -246,7 +256,8 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
     swarm: {
       plan: swarmPlan,
       currentSubtask: currentSwarmSubtask,
-    },
+      ...(swarmWorkspaceGuard ? { workspaceGuard: swarmWorkspaceGuard } : {}),
+    } as RuntimeBundle["swarm"],
     memory: {
       snippets: [
         ...(company?.description

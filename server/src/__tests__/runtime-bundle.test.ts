@@ -576,6 +576,15 @@ describe("resolveRuntimeBundle", () => {
           budgetCents: 25,
           maxRuntimeSec: 900,
         },
+        contextSnapshot: {
+          swarmWorkspaceGuard: {
+            enforcedMode: "isolated_workspace",
+            warnings: [
+              "Swarm subtask worker-heartbeat-ui forced into an isolated workspace to avoid parallel edit collisions.",
+            ],
+            errors: [],
+          },
+        },
       },
     ]);
 
@@ -611,5 +620,12 @@ describe("resolveRuntimeBundle", () => {
         ownershipMode: "exclusive",
       }),
     );
+    expect((bundle.swarm as Record<string, unknown>).workspaceGuard).toEqual({
+      enforcedMode: "isolated_workspace",
+      warnings: [
+        "Swarm subtask worker-heartbeat-ui forced into an isolated workspace to avoid parallel edit collisions.",
+      ],
+      errors: [],
+    });
   }, 20_000);
 });

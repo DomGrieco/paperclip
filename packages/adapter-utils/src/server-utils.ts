@@ -146,6 +146,9 @@ function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): st
   const runner = parseObject(bundle.runner);
   const verification = parseObject(bundle.verification);
   const memory = parseObject(bundle.memory);
+  const swarm = parseObject(bundle.swarm);
+  const currentSubtask = parseObject(swarm.currentSubtask);
+  const workspaceGuard = parseObject(swarm.workspaceGuard);
   const snippets = Array.isArray(memory.snippets)
     ? memory.snippets.filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null)
     : [];
@@ -178,6 +181,17 @@ function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): st
     `- required: ${String(verification.required ?? true)}`,
     `- requiresEvaluatorSummary: ${String(verification.requiresEvaluatorSummary ?? true)}`,
     `- requiresArtifacts: ${String(verification.requiresArtifacts ?? false)}`,
+    "",
+    "## Swarm workspace guard",
+    `- subtaskId: ${asString(currentSubtask.id, "none")}`,
+    `- kind: ${asString(currentSubtask.kind, "none")}`,
+    `- ownershipMode: ${asString(currentSubtask.ownershipMode, "none")}`,
+    `- enforcedMode: ${asString(workspaceGuard.enforcedMode, "unknown")}`,
+    `- allowedPaths: ${asStringArray(currentSubtask.allowedPaths).join(", ") || "none"}`,
+    `- forbiddenPaths: ${asStringArray(currentSubtask.forbiddenPaths).join(", ") || "none"}`,
+    `- warnings: ${asStringArray(workspaceGuard.warnings).join(" | ") || "none"}`,
+    `- errors: ${asStringArray(workspaceGuard.errors).join(" | ") || "none"}`,
+    "Stay inside allowedPaths when editing code. Treat forbiddenPaths as off-limits. If ownershipMode is read_only, do not modify those files.",
     "",
     "## Memory recall",
   ];
@@ -222,6 +236,7 @@ export async function materializeRuntimeBundleWorkspace(input: {
     ["runner.json", parseObject(bundle.runner)],
     ["run.json", parseObject(bundle.run)],
     ["verification.json", parseObject(bundle.verification)],
+    ["swarm.json", parseObject(bundle.swarm)],
     ["issue.json", parseObject(bundle.issue)],
     ["project.json", parseObject(bundle.project)],
     ["agent.json", parseObject(bundle.agent)],

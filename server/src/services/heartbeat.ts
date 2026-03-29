@@ -4,8 +4,8 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { swarmPlanSchema } from "@paperclipai/shared";
-import type { BillingType, RuntimeBundle, RuntimeBundleTarget, SwarmPlan } from "@paperclipai/shared";
+import { swarmPlanSchema, swarmSubtaskSchema } from "@paperclipai/shared";
+import type { BillingType, RuntimeBundle, RuntimeBundleTarget, SwarmPlan, SwarmSubtask } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -55,6 +55,7 @@ import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import { logActivity } from "./activity-log.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
+  deriveSwarmWorkspaceGuard,
   gateProjectExecutionWorkspacePolicy,
   parseIssueExecutionWorkspaceSettings,
   parseProjectExecutionWorkspacePolicy,
@@ -339,6 +340,12 @@ function readPlannerSwarmPlan(resultJson: Record<string, unknown> | null | undef
   }
 
   return null;
+}
+
+function readSwarmSubtaskFromContext(context: Record<string, unknown> | null | undefined): SwarmSubtask | null {
+  if (!context || typeof context !== "object" || Array.isArray(context)) return null;
+  const parsed = swarmSubtaskSchema.safeParse(context.swarmSubtask);
+  return parsed.success ? parsed.data : null;
 }
 
 function normalizeLedgerBillingType(value: unknown): BillingType {
@@ -1815,15 +1822,34 @@ export function heartbeatService(db: Db) {
       sessionCodec.deserialize(taskSessionForRun?.sessionParamsJson ?? null),
     );
     const config = parseObject(agent.adapterConfig);
+    const currentSwarmSubtask = readSwarmSubtaskFromContext(context);
+    const swarmWorkspaceGuard = deriveSwarmWorkspaceGuard({
+      mode: resolveExecutionWorkspaceMode({
+        projectPolicy: projectExecutionWorkspacePolicy,
+        issueSettings: issueExecutionWorkspaceSettings,
+        legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
+      }),
+      subtask: currentSwarmSubtask,
+    });
+    const executionWorkspaceMode = swarmWorkspaceGuard.enforcedMode;
     const swarmModelTier =
       typeof context.swarmModelTier === "string" && context.swarmModelTier.trim().length > 0
         ? context.swarmModelTier.trim()
         : null;
-    const executionWorkspaceMode = resolveExecutionWorkspaceMode({
-      projectPolicy: projectExecutionWorkspacePolicy,
-      issueSettings: issueExecutionWorkspaceSettings,
-      legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
-    });
+    if (swarmWorkspaceGuard.warnings.length > 0 || swarmWorkspaceGuard.errors.length > 0) {
+      context.swarmWorkspaceGuard = {
+        enforcedMode: swarmWorkspaceGuard.enforcedMode,
+        warnings: swarmWorkspaceGuard.warnings,
+        errors: swarmWorkspaceGuard.errors,
+      };
+    }
+    if (swarmWorkspaceGuard.errors.length > 0) {
+      throw conflict("Swarm workspace ownership policy violation", {
+        errors: swarmWorkspaceGuard.errors,
+        warnings: swarmWorkspaceGuard.warnings,
+        swarmSubtaskId: currentSwarmSubtask?.id ?? null,
+      });
+    }
     const resolvedWorkspace = await resolveWorkspaceForRun(
       agent,
       context,
@@ -1836,6 +1862,7 @@ export function heartbeatService(db: Db) {
       issueSettings: issueExecutionWorkspaceSettings,
       mode: executionWorkspaceMode,
       legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
+      swarmSubtask: currentSwarmSubtask,
     });
     const mergedConfig = issueAssigneeOverrides?.adapterConfig
       ? { ...workspaceManagedConfig, ...issueAssigneeOverrides.adapterConfig }
@@ -1861,8 +1888,12 @@ export function heartbeatService(db: Db) {
           executionWorkspacePreference: issueContext.executionWorkspacePreference,
         }
       : null;
+    const isSwarmWorkerRun = run.runType === "worker" && currentSwarmSubtask !== null;
+    const canReuseIssueWorkspace = !isSwarmWorkerRun || executionWorkspaceMode === "shared_workspace";
     const existingExecutionWorkspace =
-      issueRef?.executionWorkspaceId ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId) : null;
+      canReuseIssueWorkspace && issueRef?.executionWorkspaceId
+        ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId)
+        : null;
     const workspaceOperationRecorder = workspaceOperationsSvc.createRecorder({
       companyId: agent.companyId,
       heartbeatRunId: run.id,
@@ -1889,6 +1920,7 @@ export function heartbeatService(db: Db) {
     const resolvedProjectId = executionWorkspace.projectId ?? issueRef?.projectId ?? executionProjectId ?? null;
     const resolvedProjectWorkspaceId = issueRef?.projectWorkspaceId ?? resolvedWorkspace.workspaceId ?? null;
     const shouldReuseExisting =
+      canReuseIssueWorkspace &&
       issueRef?.executionWorkspacePreference === "reuse_existing" &&
       existingExecutionWorkspace &&
       existingExecutionWorkspace.status !== "archived";
@@ -1994,7 +2026,12 @@ export function heartbeatService(db: Db) {
         cleanupReason: null,
       });
     }
-    if (issueId && persistedExecutionWorkspace && issueRef?.executionWorkspaceId !== persistedExecutionWorkspace.id) {
+    const shouldPersistIssueWorkspacePointer =
+      issueId &&
+      persistedExecutionWorkspace &&
+      issueRef?.executionWorkspaceId !== persistedExecutionWorkspace.id &&
+      (!isSwarmWorkerRun || executionWorkspaceMode === "shared_workspace");
+    if (shouldPersistIssueWorkspacePointer && persistedExecutionWorkspace) {
       await issuesSvc.update(issueId, {
         executionWorkspaceId: persistedExecutionWorkspace.id,
         ...(resolvedProjectWorkspaceId ? { projectWorkspaceId: resolvedProjectWorkspaceId } : {}),
