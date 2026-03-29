@@ -155,4 +155,7 @@ export interface InstanceSchedulerHeartbeatAgent {
   heartbeatEnabled: boolean;
   schedulerActive: boolean;
   lastHeartbeatAt: Date | null;
+  lastWakeupRequestedAt: Date | null;
+  lastWakeupStatus: WakeupRequestStatus | null;
+  lastWakeupReason: string | null;
 }

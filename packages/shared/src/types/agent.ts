@@ -3,6 +3,7 @@ import type {
   PauseReason,
   AgentRole,
   AgentStatus,
+  WakeupRequestStatus,
 } from "../constants.js";
 
 export interface AgentPermissions {
@@ -29,6 +30,9 @@ export interface Agent {
   pausedAt: Date | null;
   permissions: AgentPermissions;
   lastHeartbeatAt: Date | null;
+  lastWakeupRequestedAt: Date | null;
+  lastWakeupStatus: WakeupRequestStatus | null;
+  lastWakeupReason: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: Date;
   updatedAt: Date;

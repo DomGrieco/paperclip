@@ -26,6 +26,18 @@ function buildAgentHref(agent: InstanceSchedulerHeartbeatAgent) {
   return `/${agent.companyIssuePrefix}/agents/${encodeURIComponent(agent.agentUrlKey)}`;
 }
 
+function latestHeartbeatLabel(agent: InstanceSchedulerHeartbeatAgent) {
+  if (agent.lastWakeupRequestedAt) return `Wake ${relativeTime(agent.lastWakeupRequestedAt)}`;
+  if (agent.lastHeartbeatAt) return `HB ${relativeTime(agent.lastHeartbeatAt)}`;
+  return "never";
+}
+
+function latestHeartbeatTitle(agent: InstanceSchedulerHeartbeatAgent) {
+  if (agent.lastWakeupRequestedAt) return `Latest wakeup request: ${formatDateTime(agent.lastWakeupRequestedAt)}`;
+  if (agent.lastHeartbeatAt) return `Latest run heartbeat: ${formatDateTime(agent.lastHeartbeatAt)}`;
+  return undefined;
+}
+
 export function InstanceSettings() {
   const { setBreadcrumbs } = useBreadcrumbs();
   const queryClient = useQueryClient();
@@ -173,11 +185,9 @@ export function InstanceSettings() {
                         </span>
                         <span
                           className="hidden md:inline text-muted-foreground truncate"
-                          title={agent.lastHeartbeatAt ? formatDateTime(agent.lastHeartbeatAt) : undefined}
+                          title={latestHeartbeatTitle(agent)}
                         >
-                          {agent.lastHeartbeatAt
-                            ? relativeTime(agent.lastHeartbeatAt)
-                            : "never"}
+                          {latestHeartbeatLabel(agent)}
                         </span>
                         <span className="ml-auto flex items-center gap-1.5 shrink-0">
                           <Link

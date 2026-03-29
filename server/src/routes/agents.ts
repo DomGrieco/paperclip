@@ -2,7 +2,7 @@ import { Router, type Request } from "express";
 import { generateKeyPairSync, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Db } from "@paperclipai/db";
-import { agents as agentsTable, companies, heartbeatRuns } from "@paperclipai/db";
+import { agents as agentsTable, agentWakeupRequests, companies, heartbeatRuns } from "@paperclipai/db";
 import { and, desc, eq, inArray, not, sql } from "drizzle-orm";
 import {
   createAgentKeySchema,
@@ -507,6 +507,26 @@ export function agentRoutes(db: Db) {
       .where(accessConditions.length > 0 ? and(...accessConditions) : undefined)
       .orderBy(companies.name, agentsTable.name);
 
+    const wakeupRows = rows.length
+      ? await db
+          .select({
+            agentId: agentWakeupRequests.agentId,
+            requestedAt: agentWakeupRequests.requestedAt,
+            status: agentWakeupRequests.status,
+            reason: agentWakeupRequests.reason,
+          })
+          .from(agentWakeupRequests)
+          .where(inArray(agentWakeupRequests.agentId, rows.map((row) => row.id)))
+          .orderBy(desc(agentWakeupRequests.requestedAt), desc(agentWakeupRequests.createdAt))
+      : [];
+
+    const wakeupByAgentId = new Map<string, (typeof wakeupRows)[number]>();
+    for (const row of wakeupRows) {
+      if (!wakeupByAgentId.has(row.agentId)) {
+        wakeupByAgentId.set(row.agentId, row);
+      }
+    }
+
     const items: InstanceSchedulerHeartbeatAgent[] = rows
       .map((row) => {
         const policy = parseSchedulerHeartbeatPolicy(row.runtimeConfig);
@@ -514,6 +534,7 @@ export function agentRoutes(db: Db) {
           row.status !== "paused" &&
           row.status !== "terminated" &&
           row.status !== "pending_approval";
+        const wakeup = wakeupByAgentId.get(row.id);
 
         return {
           id: row.id,
@@ -530,6 +551,9 @@ export function agentRoutes(db: Db) {
           heartbeatEnabled: policy.enabled,
           schedulerActive: statusEligible && policy.enabled && policy.intervalSec > 0,
           lastHeartbeatAt: row.lastHeartbeatAt,
+          lastWakeupRequestedAt: wakeup?.requestedAt ?? null,
+          lastWakeupStatus: (wakeup?.status as InstanceSchedulerHeartbeatAgent["lastWakeupStatus"]) ?? null,
+          lastWakeupReason: wakeup?.reason ?? null,
         };
       })
       .filter((item) =>

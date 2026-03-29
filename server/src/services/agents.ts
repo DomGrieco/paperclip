@@ -12,7 +12,7 @@ import {
   heartbeatRunEvents,
   heartbeatRuns,
 } from "@paperclipai/db";
-import { isUuidLike, normalizeAgentUrlKey } from "@paperclipai/shared";
+import { isUuidLike, normalizeAgentUrlKey, type WakeupRequestStatus } from "@paperclipai/shared";
 import { conflict, notFound, unprocessable } from "../errors.js";
 import { normalizeAgentPermissions } from "./agent-permissions.js";
 import { normalizeHermesAdapterConfigForDisplay } from "../adapters/hermes-models.js";
@@ -62,6 +62,12 @@ interface AgentShortnameRow {
 interface AgentShortnameCollisionOptions {
   excludeAgentId?: string | null;
 }
+
+type AgentWakeupSummary = {
+  requestedAt: Date | null;
+  status: WakeupRequestStatus | null;
+  reason: string | null;
+};
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -204,7 +210,10 @@ export function agentService(db: Db) {
     };
   }
 
-  function normalizeAgentRow(row: typeof agents.$inferSelect) {
+  function normalizeAgentRow(
+    row: typeof agents.$inferSelect,
+    wakeupSummary?: AgentWakeupSummary | null,
+  ) {
     const normalizedAdapterConfig =
       row.adapterType === "hermes_local" &&
       typeof row.adapterConfig === "object" &&
@@ -218,7 +227,56 @@ export function agentService(db: Db) {
       ...row,
       adapterConfig: normalizedAdapterConfig,
       permissions: normalizeAgentPermissions(row.permissions, row.role),
+      lastWakeupRequestedAt: wakeupSummary?.requestedAt ?? null,
+      lastWakeupStatus: wakeupSummary?.status ?? null,
+      lastWakeupReason: wakeupSummary?.reason ?? null,
     });
+  }
+
+  async function getLatestWakeupSummary(agentId: string): Promise<AgentWakeupSummary | null> {
+    const row = await db
+      .select({
+        requestedAt: agentWakeupRequests.requestedAt,
+        status: agentWakeupRequests.status,
+        reason: agentWakeupRequests.reason,
+      })
+      .from(agentWakeupRequests)
+      .where(eq(agentWakeupRequests.agentId, agentId))
+      .orderBy(desc(agentWakeupRequests.requestedAt), desc(agentWakeupRequests.createdAt))
+      .limit(1)
+      .then((rows) => rows[0] ?? null);
+    return row
+      ? {
+          requestedAt: row.requestedAt,
+          status: row.status as WakeupRequestStatus,
+          reason: row.reason,
+        }
+      : null;
+  }
+
+  async function getLatestWakeupSummaryByAgentIds(agentIds: string[]): Promise<Map<string, AgentWakeupSummary>> {
+    if (agentIds.length === 0) return new Map();
+    const rows = await db
+      .select({
+        agentId: agentWakeupRequests.agentId,
+        requestedAt: agentWakeupRequests.requestedAt,
+        status: agentWakeupRequests.status,
+        reason: agentWakeupRequests.reason,
+      })
+      .from(agentWakeupRequests)
+      .where(inArray(agentWakeupRequests.agentId, agentIds))
+      .orderBy(desc(agentWakeupRequests.requestedAt), desc(agentWakeupRequests.createdAt));
+
+    const result = new Map<string, AgentWakeupSummary>();
+    for (const row of rows) {
+      if (result.has(row.agentId)) continue;
+      result.set(row.agentId, {
+        requestedAt: row.requestedAt,
+        status: row.status as WakeupRequestStatus,
+        reason: row.reason,
+      });
+    }
+    return result;
   }
 
   async function getMonthlySpendByAgentIds(companyId: string, agentIds: string[]) {
@@ -261,7 +319,8 @@ export function agentService(db: Db) {
       .then((rows) => rows[0] ?? null);
     if (!row) return null;
     const [hydrated] = await hydrateAgentSpend([row]);
-    return normalizeAgentRow(hydrated);
+    const wakeupSummary = await getLatestWakeupSummary(id);
+    return normalizeAgentRow(hydrated, wakeupSummary);
   }
 
   async function ensureManager(companyId: string, managerId: string) {
@@ -360,7 +419,13 @@ export function agentService(db: Db) {
       .where(eq(agents.id, id))
       .returning()
       .then((rows) => rows[0] ?? null);
-    const normalizedUpdated = updated ? normalizeAgentRow(updated) : null;
+    const normalizedUpdated = updated
+      ? normalizeAgentRow(updated, {
+          requestedAt: existing.lastWakeupRequestedAt,
+          status: existing.lastWakeupStatus,
+          reason: existing.lastWakeupReason,
+        })
+      : null;
 
     if (normalizedUpdated && shouldRecordRevision && beforeConfig) {
       const afterConfig = buildConfigSnapshot(normalizedUpdated);
@@ -391,7 +456,8 @@ export function agentService(db: Db) {
       }
       const rows = await db.select().from(agents).where(and(...conditions));
       const hydrated = await hydrateAgentSpend(rows);
-      return hydrated.map(normalizeAgentRow);
+      const wakeupSummaries = await getLatestWakeupSummaryByAgentIds(hydrated.map((row) => row.id));
+      return hydrated.map((row) => normalizeAgentRow(row, wakeupSummaries.get(row.id) ?? null));
     },
 
     getById,
@@ -632,7 +698,8 @@ export function agentService(db: Db) {
         .select()
         .from(agents)
         .where(and(eq(agents.companyId, companyId), ne(agents.status, "terminated")));
-      const normalizedRows = rows.map(normalizeAgentRow);
+      const wakeupSummaries = await getLatestWakeupSummaryByAgentIds(rows.map((row) => row.id));
+      const normalizedRows = rows.map((row) => normalizeAgentRow(row, wakeupSummaries.get(row.id) ?? null));
       const byManager = new Map<string | null, typeof normalizedRows>();
       for (const row of normalizedRows) {
         const key = row.reportsTo ?? null;
@@ -693,8 +760,9 @@ export function agentService(db: Db) {
       }
 
       const rows = await db.select().from(agents).where(eq(agents.companyId, companyId));
+      const wakeupSummaries = await getLatestWakeupSummaryByAgentIds(rows.map((row) => row.id));
       const matches = rows
-        .map(normalizeAgentRow)
+        .map((row) => normalizeAgentRow(row, wakeupSummaries.get(row.id) ?? null))
         .filter((agent) => agent.urlKey === urlKey && agent.status !== "terminated");
       if (matches.length === 1) {
         return { agent: matches[0] ?? null, ambiguous: false } as const;

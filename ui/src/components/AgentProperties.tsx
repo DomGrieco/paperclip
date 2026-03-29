@@ -6,7 +6,7 @@ import { useCompany } from "../context/CompanyContext";
 import { queryKeys } from "../lib/queryKeys";
 import { StatusBadge } from "./StatusBadge";
 import { Identity } from "./Identity";
-import { formatDate, agentUrl } from "../lib/utils";
+import { formatDate, formatDateTime, agentUrl } from "../lib/utils";
 import { Separator } from "@/components/ui/separator";
 
 interface AgentPropertiesProps {
@@ -82,9 +82,20 @@ export function AgentProperties({ agent, runtimeState }: AgentPropertiesProps) {
             <span className="text-xs text-red-600 dark:text-red-400 truncate max-w-[160px]">{runtimeState.lastError}</span>
           </PropertyRow>
         )}
+        {agent.lastWakeupRequestedAt && (
+          <PropertyRow label="Last Wake">
+            <span className="text-sm">{formatDateTime(agent.lastWakeupRequestedAt)}</span>
+            {agent.lastWakeupStatus && (
+              <span className="text-xs text-muted-foreground">{agent.lastWakeupStatus}</span>
+            )}
+            {agent.lastWakeupReason && (
+              <span className="text-xs text-muted-foreground">· {agent.lastWakeupReason}</span>
+            )}
+          </PropertyRow>
+        )}
         {agent.lastHeartbeatAt && (
           <PropertyRow label="Last Heartbeat">
-            <span className="text-sm">{formatDate(agent.lastHeartbeatAt)}</span>
+            <span className="text-sm">{formatDateTime(agent.lastHeartbeatAt)}</span>
           </PropertyRow>
         )}
         {agent.reportsTo && (
