@@ -138,6 +138,34 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("PATCH /api/issues/issue-99 (max 1)");
   });
 
+  it("does not append a governed api contract when validation criteria explicitly require planner fan-out proof", () => {
+    const prompt = buildPrompt(
+      buildContext({
+        context: {
+          paperclipRuntimeBundle: {
+            issue: {
+              id: "issue-100",
+              title: "Worker artifact acceptance regression validation rerun",
+            },
+            memory: {
+              snippets: [
+                {
+                  source: "issue.description",
+                  content:
+                    "Acceptance criteria: planner fans out into child runs, worker childOutput artifactClaims are persisted as reviewable artifacts, at least one reviewerDecision is accept, and planner synthesis cites accepted child outputs/artifacts.",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      {},
+    );
+
+    expect(prompt).not.toContain("## Governed API contract");
+    expect(prompt).toContain("## Assigned Task");
+  });
+
   it("adds a planner orchestration contract for planner-root runs", () => {
     const prompt = buildPrompt(
       buildContext({

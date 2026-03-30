@@ -562,6 +562,55 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_POLICY_SUMMARY");
   });
 
+  it("does not govern fan-out validation issues that explicitly require worker/reviewer proof", async () => {
+    const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        env: {
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource,
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        issue: {
+          id: "issue-88",
+          identifier: "PAP-88",
+          title: "Worker artifact acceptance regression validation rerun",
+          status: "in_progress",
+          priority: "high",
+        },
+        memory: {
+          snippets: [
+            {
+              scope: "issue",
+              source: "issue.description",
+              sourceId: "issue-88",
+              content:
+                "Acceptance criteria: planner fans out into child runs, worker childOutput artifactClaims are persisted as reviewable artifacts, at least one reviewerDecision is accept, and planner synthesis cites accepted child outputs/artifacts.",
+              freshness: "static",
+              updatedAt: "2026-03-24T00:00:00.000Z",
+              rank: 1,
+            },
+          ],
+        },
+      }),
+      authToken: "jwt-token-888",
+      managedRuntime: makeManagedRuntime(cwd),
+    });
+
+    const env = nextConfig.env as Record<string, string>;
+    expect(env.PAPERCLIP_API_POLICY_JSON).toBeUndefined();
+    expect(env.PAPERCLIP_API_POLICY_SUMMARY).toBeUndefined();
+  });
+
   it("clears stale runtime bundle artifacts when a heartbeat run has no runtime bundle", async () => {
     const cwd = await makeTempDir();
     const runtimeRoot = path.join(cwd, ".paperclip", "runtime");

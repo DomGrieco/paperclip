@@ -49,7 +49,20 @@ function looksLikeGovernedValidationTask(input: {
     text.includes("only read instructions.md, bundle.json, and shared-context.json") ||
     text.includes("issue-backed planner execution");
 
-  return hasValidationVerb && hasStructuredContract;
+  const requestsPlannerFanoutProof =
+    text.includes("fan-out") ||
+    text.includes("fan out") ||
+    text.includes("child runs") ||
+    text.includes("worker childoutput") ||
+    text.includes("worker child outputs") ||
+    text.includes("worker artifacts") ||
+    text.includes("reviewerdecision") ||
+    text.includes("reviewer decisions") ||
+    text.includes("planner synthesis") ||
+    text.includes("accepted child outputs") ||
+    text.includes("accepted artifacts");
+
+  return hasValidationVerb && hasStructuredContract && !requestsPlannerFanoutProof;
 }
 
 export function derivePaperclipApiGovernancePolicy(
