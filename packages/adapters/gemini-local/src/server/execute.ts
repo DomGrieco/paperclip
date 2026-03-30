@@ -83,13 +83,26 @@ function geminiSkillsHome(): string {
  * This avoids needing GEMINI_CLI_HOME overrides, so the CLI naturally finds
  * both its auth credentials and the injected skills in the real home directory.
  */
-async function ensureGeminiSkillsInjected(
+type EnsureGeminiSkillsInjectedOptions = {
+  skillsDir?: string | null;
+  skillsHome?: string;
+  skillsEntries?: Awaited<ReturnType<typeof listPaperclipSkillEntries>>;
+};
+
+export async function ensureGeminiSkillsInjected(
   onLog: AdapterExecutionContext["onLog"],
+  options: EnsureGeminiSkillsInjectedOptions = {},
 ): Promise<void> {
-  const skillsEntries = await listPaperclipSkillEntries(__moduleDir);
+  const skillsEntries = options.skillsEntries
+    ?? (options.skillsDir
+      ? (await fs.readdir(options.skillsDir, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, source: path.join(options.skillsDir!, entry.name) }))
+      : await listPaperclipSkillEntries(__moduleDir));
   if (skillsEntries.length === 0) return;
 
-  const skillsHome = geminiSkillsHome();
+
+  const skillsHome = options.skillsHome ?? geminiSkillsHome();
   try {
     await fs.mkdir(skillsHome, { recursive: true });
   } catch (err) {
@@ -159,7 +172,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     defaultCwd: process.cwd(),
   });
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
-  await ensureGeminiSkillsInjected(onLog);
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
+  await ensureGeminiSkillsInjected(onLog, materializedSkillsDir ? { skillsDir: materializedSkillsDir } : {});
 
   const envConfig = parseObject(config.env);
   const hasExplicitApiKey =

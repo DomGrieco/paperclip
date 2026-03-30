@@ -165,4 +165,46 @@ describe("gemini execute", () => {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
+
+  it("injects managed skills from paperclipSkillsDir into the gemini home", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-skills-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "gemini");
+    const capturePath = path.join(root, "capture.json");
+    const skillsDir = path.join(root, "materialized-skills");
+    await fs.mkdir(workspace, { recursive: true });
+    await fs.mkdir(path.join(skillsDir, "managed-skill"), { recursive: true });
+    await fs.writeFile(path.join(skillsDir, "managed-skill", "SKILL.md"), "---\nname: managed-skill\n---\n", "utf8");
+    await writeFakeGeminiCommand(commandPath);
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    try {
+      await execute({
+        runId: "run-skills",
+        agent: { id: "a1", companyId: "c1", name: "G", adapterType: "gemini_local", adapterConfig: {} },
+        runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: { PAPERCLIP_TEST_CAPTURE_PATH: capturePath },
+        },
+        context: { paperclipSkillsDir: skillsDir },
+        authToken: "t",
+        onLog: async () => {},
+      });
+
+      expect(await fs.realpath(path.join(root, ".gemini", "skills", "managed-skill"))).toBe(
+        await fs.realpath(path.join(skillsDir, "managed-skill")),
+      );
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
 });
