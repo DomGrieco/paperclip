@@ -390,6 +390,87 @@ describe("run graph schema contract", () => {
     );
   }, 20_000);
 
+  it("assigns planned sibling workers to distinct worker-capable agents when available", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [plannerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "CEO Planner",
+      role: "ceo",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [engineerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Engineer Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [qaAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "QA Worker",
+      role: "qa",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Parallel sibling execution",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: plannerAgent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, plannerAgent.id);
+    await graph.attachSwarmPlan(planner.id, {
+      version: "v1",
+      plannerRunId: planner.id,
+      generatedAt: "2026-03-30T01:00:00.000Z",
+      subtasks: [
+        {
+          id: "implement-fix",
+          kind: "implementation",
+          title: "Implement the runtime fix",
+          goal: "Patch the runtime behavior.",
+          taskKey: "implement-fix",
+          expectedArtifacts: [{ kind: "patch", required: true }],
+          acceptanceChecks: ["Code change committed in worker branch."],
+          recommendedModelTier: "balanced",
+        },
+        {
+          id: "verify-fix",
+          kind: "verification",
+          title: "Verify the runtime fix",
+          goal: "Run browser and test validation for the patch.",
+          taskKey: "verify-fix",
+          expectedArtifacts: [{ kind: "test_result", required: true }],
+          acceptanceChecks: ["Validation cites concrete results."],
+          recommendedModelTier: "balanced",
+        },
+      ],
+    });
+
+    const workers = await graph.materializePlannedWorkers(planner.id);
+
+    expect(workers).toHaveLength(2);
+    expect(workers.map((worker) => worker.agentId).sort()).toEqual(
+      [engineerAgent.id, qaAgent.id].sort(),
+    );
+    expect(workers.every((worker) => worker.agentId !== plannerAgent.id)).toBe(true);
+  }, 20_000);
+
   it("queues a repair worker when verification returns repair and retries remain", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);

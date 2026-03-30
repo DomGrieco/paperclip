@@ -2561,7 +2561,13 @@ export function heartbeatService(db: Db) {
           const plannerSwarmPlan = readPlannerSwarmPlan(adapterResult.resultJson ?? null, finalizedRun.id);
           if (plannerSwarmPlan) {
             await issueRunGraph.attachSwarmPlan(finalizedRun.id, plannerSwarmPlan);
-            await issueRunGraph.materializePlannedWorkers(finalizedRun.id);
+            const materializedWorkers = await issueRunGraph.materializePlannedWorkers(finalizedRun.id);
+            const workerAgentIds: string[] = Array.from(
+              new Set(materializedWorkers.map((worker) => String(worker.agentId))),
+            );
+            for (const workerAgentId of workerAgentIds) {
+              await startNextQueuedRunForAgent(workerAgentId);
+            }
           }
         }
         if (finalizedRun.runType === "verification") {
