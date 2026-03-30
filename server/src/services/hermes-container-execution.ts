@@ -98,6 +98,17 @@ function cfgRecord(v: unknown): Record<string, unknown> | undefined {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 }
 
+export function resolveContainerHermesCommand(
+  ctx: Pick<AdapterExecutionContext, "context">,
+  config: Record<string, unknown>,
+): string {
+  const launchPlan = cfgRecord(ctx.context?.paperclipHermesContainerPlan);
+  const launchPlanCommand = Array.isArray(launchPlan?.command)
+    ? launchPlan.command.find((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : null;
+  return launchPlanCommand ?? cfgString(config.hermesCommand) ?? HERMES_CLI;
+}
+
 function getIssueDescriptionFromRuntimeMemory(runtimeBundle: Record<string, unknown> | undefined): string {
   const memory = cfgRecord(runtimeBundle?.memory);
   const snippets = Array.isArray(memory?.snippets) ? memory.snippets : [];
@@ -353,7 +364,7 @@ export async function executeHermesInContainer(ctx: AdapterExecutionContext): Pr
     throw new Error("Hermes container execution requested but no launched hermes_container runtime service was found in context.paperclipRuntimeServices");
   }
 
-  const hermesCmd = cfgString(config.hermesCommand) || HERMES_CLI;
+  const hermesCmd = resolveContainerHermesCommand(ctx, config);
   const model = cfgString(config.model) || DEFAULT_MODEL;
   const provider = cfgString(config.provider);
   const timeoutSec = cfgNumber(config.timeoutSec) || DEFAULT_TIMEOUT_SEC;

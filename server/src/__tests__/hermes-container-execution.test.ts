@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterExecutionContext } from "../adapters/types.js";
-import { buildPrompt } from "../services/hermes-container-execution.js";
+import { buildPrompt, resolveContainerHermesCommand } from "../services/hermes-container-execution.js";
 
 function buildContext(overrides: Partial<AdapterExecutionContext> = {}): AdapterExecutionContext {
   return {
@@ -25,6 +25,33 @@ function buildContext(overrides: Partial<AdapterExecutionContext> = {}): Adapter
     ...overrides,
   };
 }
+
+describe("resolveContainerHermesCommand", () => {
+  it("prefers the launch-plan container command over the host execution config command", () => {
+    const command = resolveContainerHermesCommand(
+      buildContext({
+        context: {
+          paperclipHermesContainerPlan: {
+            command: ["/paperclip/runtime/hermes-managed/venv/bin/hermes"],
+          },
+        },
+      }),
+      {
+        hermesCommand: "/Users/eru/.paperclip/runtime-cache/hermes/channels/stable/installs/current/venv/bin/hermes",
+      },
+    );
+
+    expect(command).toBe("/paperclip/runtime/hermes-managed/venv/bin/hermes");
+  });
+
+  it("falls back to the configured command when no launch plan is present", () => {
+    const command = resolveContainerHermesCommand(buildContext(), {
+      hermesCommand: "/tmp/custom-hermes",
+    });
+
+    expect(command).toBe("/tmp/custom-hermes");
+  });
+});
 
 describe("buildPrompt", () => {
   it("uses issue details from the runtime bundle when explicit task config is missing", () => {

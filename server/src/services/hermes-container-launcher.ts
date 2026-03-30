@@ -316,12 +316,17 @@ export function buildDockerBindsFromPlan(input: {
   plan: HermesContainerLaunchPlan;
   sourceContainerMounts: DockerContainerMount[];
 }): string[] {
-  return input.plan.mounts.map((mount) => {
+  return input.plan.mounts.flatMap((mount) => {
     const sourcePath = resolveMountSourcePath({
       containerPath: mount.hostPath,
       mounts: input.sourceContainerMounts,
     });
-    return `${sourcePath}:${mount.containerPath}${mount.readOnly ? ":ro" : ""}`;
+    const suffix = mount.readOnly ? ":ro" : "";
+    const binds = [`${sourcePath}:${mount.containerPath}${suffix}`];
+    if (mount.kind === "managed_runtime" && mount.hostPath !== mount.containerPath) {
+      binds.push(`${sourcePath}:${mount.hostPath}${suffix}`);
+    }
+    return binds;
   });
 }
 
