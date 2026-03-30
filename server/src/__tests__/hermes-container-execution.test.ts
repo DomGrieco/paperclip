@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AdapterExecutionContext } from "../adapters/types.js";
-import { buildPrompt, resolveContainerHermesCommand } from "../services/hermes-container-execution.js";
+import { buildPrompt, parseHermesOutput, resolveContainerHermesCommand } from "../services/hermes-container-execution.js";
 
 function buildContext(overrides: Partial<AdapterExecutionContext> = {}): AdapterExecutionContext {
   return {
@@ -136,5 +136,92 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("GET /api/issues/issue-99 (max 2)");
     expect(prompt).toContain("POST /api/issues/issue-99/comments (max 1)");
     expect(prompt).toContain("PATCH /api/issues/issue-99 (max 1)");
+  });
+
+  it("adds a planner orchestration contract for planner-root runs", () => {
+    const prompt = buildPrompt(
+      buildContext({
+        context: {
+          paperclipRuntimeBundle: {
+            issue: {
+              id: "issue-42",
+              title: "Planner-grade orchestration validation",
+            },
+            run: {
+              id: "run-1",
+              runType: "planner",
+              rootRunId: "run-1",
+              parentRunId: null,
+            },
+            swarm: {
+              plan: null,
+              currentSubtask: null,
+            },
+            memory: {
+              snippets: [
+                {
+                  source: "issue.description",
+                  content: "Delegate at least two concrete child workstreams when appropriate.",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      {},
+    );
+
+    expect(prompt).toContain("## Planner orchestration contract");
+    expect(prompt).toContain("PAPERCLIP_RESULT_JSON_START");
+    expect(prompt).toContain("Paperclip materializes child runs from structured planner output");
+    expect(prompt).toContain("POST /api/issues/{issueId}/runs");
+    expect(prompt).toContain("Allowed subtask kinds are exactly");
+    expect(prompt).toContain("`verification` for QA/browser-visible validation work");
+    expect(prompt).toContain("Allowed artifact kinds are exactly");
+    expect(prompt).toContain("`read_only` or `advisory`");
+  });
+});
+
+describe("parseHermesOutput", () => {
+  it("extracts structured Paperclip result JSON blocks from the Hermes response", () => {
+    const parsed = parseHermesOutput(
+      [
+        "Planner summary for board review.",
+        "PAPERCLIP_RESULT_JSON_START",
+        JSON.stringify({
+          swarmPlan: {
+            version: "v1",
+            rationale: "Split implementation and verification.",
+            subtasks: [
+              {
+                id: "worker-1",
+                kind: "implementation",
+                title: "Implement change",
+                goal: "Land the patch.",
+                acceptanceChecks: ["Patch exists"],
+                expectedArtifacts: [{ kind: "patch", required: true }],
+                recommendedModelTier: "balanced",
+                budgetCents: 25,
+                maxRuntimeSec: 900,
+              },
+            ],
+          },
+        }),
+        "PAPERCLIP_RESULT_JSON_END",
+        "session_id: sess-123",
+      ].join("\n"),
+      "",
+    );
+
+    expect(parsed.response).toBe("Planner summary for board review.");
+    expect(parsed.sessionId).toBe("sess-123");
+    expect(parsed.resultJson).toEqual(
+      expect.objectContaining({
+        swarmPlan: expect.objectContaining({
+          version: "v1",
+          subtasks: [expect.objectContaining({ id: "worker-1" })],
+        }),
+      }),
+    );
   });
 });
