@@ -183,6 +183,15 @@ function parseVersion(stdout: string, stderr: string): string {
   return merged.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "unknown";
 }
 
+async function commandIsFunctional(command: string, runCommand: RunCommand): Promise<boolean> {
+  try {
+    await runCommand({ command, args: ["--version"] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
   const startedAt = Date.now();
   while (true) {
@@ -213,26 +222,24 @@ async function installManagedRuntime(input: {
 
   const stamp = input.now.toISOString().replace(/[:.]/g, "-");
   const finalRoot = path.join(installsRoot, stamp);
-  const tempRoot = `${finalRoot}.tmp-${Math.random().toString(36).slice(2, 8)}`;
-  const venvRoot = path.join(tempRoot, "venv");
+  const venvRoot = path.join(finalRoot, "venv");
   const pythonCommand = path.join(venvRoot, "bin", "python");
   const hermesCommand = path.join(venvRoot, "bin", "hermes");
 
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.rm(finalRoot, { recursive: true, force: true });
   await input.runCommand({ command: "python3", args: ["-m", "venv", venvRoot] });
   await input.runCommand({ command: pythonCommand, args: ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"] });
   await input.runCommand({ command: pythonCommand, args: ["-m", "pip", "install", "--upgrade", input.settings.source] });
   const versionResult = await input.runCommand({ command: hermesCommand, args: ["--version"] });
   const version = parseVersion(versionResult.stdout, versionResult.stderr);
 
-  await fs.rename(tempRoot, finalRoot);
   return {
     schemaVersion: "v1",
     channel: input.settings.channel,
     source: input.settings.source,
     installRoot: finalRoot,
-    hermesCommand: path.join(finalRoot, "venv", "bin", "hermes"),
-    pythonCommand: path.join(finalRoot, "venv", "bin", "python"),
+    hermesCommand,
+    pythonCommand,
     version,
     checkedAt: nowIso(input.now),
     updatedAt: nowIso(input.now),
@@ -265,6 +272,7 @@ export async function ensureManagedHermesRuntime(input: {
       existing.channel === settings.channel &&
       existing.source === settings.source &&
       (await pathExists(existing.hermesCommand)) &&
+      (await commandIsFunctional(existing.hermesCommand, runCommand)) &&
       (!settings.enabled || !isStale(existing, now))
     ) {
       const nextInfo: HermesManagedRuntimeInfo = {

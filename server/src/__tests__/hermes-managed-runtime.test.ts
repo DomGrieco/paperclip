@@ -37,6 +37,49 @@ function makeRunner(calls: Array<{ command: string; args: string[] }>) {
 }
 
 describe("ensureManagedHermesRuntime", () => {
+  it("reinstalls when stored metadata points at a non-functional Hermes command", async () => {
+    const channelRoot = await makeTempDir();
+    const installsRoot = path.join(channelRoot, "installs", "broken");
+    const brokenBin = path.join(installsRoot, "venv", "bin");
+    await fs.mkdir(brokenBin, { recursive: true });
+    await fs.writeFile(path.join(brokenBin, "python"), "#!/bin/sh\necho python\n", { mode: 0o755 });
+    await fs.writeFile(path.join(brokenBin, "hermes"), "#!/nonexistent/python\nprint('broken')\n", { mode: 0o755 });
+    await fs.writeFile(
+      path.join(channelRoot, "metadata.json"),
+      JSON.stringify({
+        schemaVersion: "v1",
+        channel: "stable",
+        source: "git+https://github.com/NousResearch/hermes-agent.git",
+        installRoot: installsRoot,
+        hermesCommand: path.join(brokenBin, "hermes"),
+        pythonCommand: path.join(brokenBin, "python"),
+        version: "Hermes Agent v0.5.0",
+        checkedAt: "2026-03-29T23:00:00.000Z",
+        updatedAt: "2026-03-29T23:00:00.000Z",
+        refreshIntervalMinutes: 360,
+      }) + "\n",
+      "utf8",
+    );
+
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const baseRunner = makeRunner(calls);
+    const result = await ensureManagedHermesRuntime({
+      channelRoot,
+      now: new Date("2026-03-29T23:30:00.000Z"),
+      runCommand: async (input) => {
+        if (input.command === path.join(brokenBin, "hermes") && input.args.length === 1 && input.args[0] === "--version") {
+          throw new Error(`broken managed runtime command: ${input.command}`);
+        }
+        return await baseRunner(input);
+      },
+      config: {},
+    });
+
+    expect(result.refreshed).toBe(true);
+    expect(result.installRoot).not.toBe(installsRoot);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
   it("installs Hermes into a managed runtime cache and persists metadata", async () => {
     const channelRoot = await makeTempDir();
     const calls: Array<{ command: string; args: string[] }> = [];
@@ -89,7 +132,11 @@ describe("ensureManagedHermesRuntime", () => {
     expect(second.refreshed).toBe(false);
     expect(second.installRoot).toBe(first.installRoot);
     expect(second.checkedAt).toBe("2026-03-30T00:00:00.000Z");
-    expect(secondCalls).toHaveLength(0);
+    expect(secondCalls).toHaveLength(1);
+    expect(secondCalls[0]).toEqual({
+      command: first.hermesCommand,
+      args: ["--version"],
+    });
   });
 
   it("refreshes a stale runtime when the refresh interval has elapsed", async () => {
