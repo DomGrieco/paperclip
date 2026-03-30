@@ -29,6 +29,8 @@ export { issueLabels } from "./issue_labels.js";
 export { issueApprovals } from "./issue_approvals.js";
 export { issueComments } from "./issue_comments.js";
 export { issueReadStates } from "./issue_read_states.js";
+export { managedSkills } from "./managed_skills.js";
+export { managedSkillScopes } from "./managed_skill_scopes.js";
 export { sharedContextPublications } from "./shared_context_publications.js";
 export { assets } from "./assets.js";
 export { issueAttachments } from "./issue_attachments.js";

@@ -98,6 +98,7 @@ async function isLikelyPaperclipRuntimeSkillSource(candidate: string, skillName:
 }
 
 type EnsureCodexSkillsInjectedOptions = {
+  skillsDir?: string | null;
   skillsHome?: string;
   skillsEntries?: Awaited<ReturnType<typeof listPaperclipSkillEntries>>;
   linkSkill?: (source: string, target: string) => Promise<void>;
@@ -107,7 +108,12 @@ export async function ensureCodexSkillsInjected(
   onLog: AdapterExecutionContext["onLog"],
   options: EnsureCodexSkillsInjectedOptions = {},
 ) {
-  const skillsEntries = options.skillsEntries ?? await listPaperclipSkillEntries(__moduleDir);
+  const skillsEntries = options.skillsEntries
+    ?? (options.skillsDir
+      ? (await fs.readdir(options.skillsDir, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, source: path.join(options.skillsDir!, entry.name) }))
+      : await listPaperclipSkillEntries(__moduleDir));
   if (skillsEntries.length === 0) return;
 
   const skillsHome = options.skillsHome ?? path.join(resolveCodexHomeDir(process.env), "skills");
@@ -236,9 +242,17 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const preparedWorktreeCodexHome =
     configuredCodexHome ? null : await prepareWorktreeCodexHome(process.env, onLog);
   const effectiveCodexHome = configuredCodexHome ?? preparedWorktreeCodexHome;
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
   await ensureCodexSkillsInjected(
     onLog,
-    effectiveCodexHome ? { skillsHome: path.join(effectiveCodexHome, "skills") } : {},
+    effectiveCodexHome
+      ? {
+          skillsHome: path.join(effectiveCodexHome, "skills"),
+          skillsDir: materializedSkillsDir || undefined,
+        }
+      : materializedSkillsDir
+        ? { skillsDir: materializedSkillsDir }
+        : {},
   );
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;

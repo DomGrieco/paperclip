@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
@@ -51,6 +52,7 @@ import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
+import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import { logActivity } from "./activity-log.js";
 import {
@@ -77,6 +79,7 @@ const startLocksByAgent = new Map<string, Promise<void>>();
 const REPO_ONLY_CWD_SENTINEL = "/__paperclip_repo_only__";
 const MANAGED_WORKSPACE_GIT_CLONE_TIMEOUT_MS = 10 * 60 * 1000;
 const execFile = promisify(execFileCallback);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SESSIONED_LOCAL_ADAPTERS = new Set([
   "claude_local",
   "codex_local",
@@ -2099,6 +2102,24 @@ export function heartbeatService(db: Db) {
     if (executionWorkspace.projectId && !readNonEmptyString(context.projectId)) {
       context.projectId = executionWorkspace.projectId;
     }
+    const effectiveSkills = await managedSkillService(db).resolveEffectiveSkills({
+      companyId: agent.companyId,
+      projectId: executionWorkspace.projectId,
+      agentId: agent.id,
+      moduleDir: __dirname,
+    });
+    const materializedSkills = await materializeEffectiveSkills({
+      outputRoot: path.join(executionWorkspace.cwd, ".paperclip", "runtime", "skills"),
+      skills: effectiveSkills,
+    });
+    context.paperclipSkillsDir = materializedSkills.skillsDir;
+    context.paperclipEffectiveSkills = effectiveSkills.map((skill) => ({
+      name: skill.name,
+      sourceType: skill.sourceType,
+      sourceLabel: skill.sourceLabel,
+      managedSkillId: skill.managedSkillId,
+      scopeId: skill.scopeId,
+    }));
     const runtimeBundleTarget =
       issueId ? resolveRuntimeBundleTargetForAgent(agent.adapterType) : null;
     const runtimeBundle =

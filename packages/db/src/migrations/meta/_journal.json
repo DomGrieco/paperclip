@@ -288,6 +288,13 @@
       "when": 1774322728227,
       "tag": "0040_wide_albert_cleary",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1774901988695,
+      "tag": "0041_gigantic_gideon",
+      "breakpoints": true
     }
   ]
 }

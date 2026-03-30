@@ -196,7 +196,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         : ".paperclip/runtime",
     runtimeBundle: context.paperclipRuntimeBundle,
   });
-  await ensureCursorSkillsInjected(onLog);
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
+  await ensureCursorSkillsInjected(onLog, materializedSkillsDir ? { skillsDir: materializedSkillsDir } : {});
 
   const envConfig = parseObject(config.env);
   const hasExplicitApiKey =
