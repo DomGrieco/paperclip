@@ -56,37 +56,52 @@ function resolvePiBiller(env: Record<string, string>, provider: string | null): 
   return inferOpenAiCompatibleBiller(env, null) ?? provider ?? "unknown";
 }
 
-async function ensurePiSkillsInjected(onLog: AdapterExecutionContext["onLog"]) {
-  const skillsEntries = await listPaperclipSkillEntries(__moduleDir);
+type EnsurePiSkillsInjectedOptions = {
+  skillsDir?: string | null;
+  skillsHome?: string;
+  skillsEntries?: Awaited<ReturnType<typeof listPaperclipSkillEntries>>;
+};
 
-  await fs.mkdir(PI_AGENT_SKILLS_DIR, { recursive: true });
+export async function ensurePiSkillsInjected(
+  onLog: AdapterExecutionContext["onLog"],
+  options: EnsurePiSkillsInjectedOptions = {},
+) {
+  const skillsEntries = options.skillsEntries
+    ?? (options.skillsDir
+      ? (await fs.readdir(options.skillsDir, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, source: path.join(options.skillsDir!, entry.name) }))
+      : await listPaperclipSkillEntries(__moduleDir));
+
+  const skillsHome = options.skillsHome ?? PI_AGENT_SKILLS_DIR;
+  await fs.mkdir(skillsHome, { recursive: true });
   if (skillsEntries.length === 0) return;
 
   const removedSkills = await removeMaintainerOnlySkillSymlinks(
-    PI_AGENT_SKILLS_DIR,
+    skillsHome,
     skillsEntries.map((entry) => entry.name),
   );
   for (const skillName of removedSkills) {
     await onLog(
       "stderr",
-      `[paperclip] Removed maintainer-only Pi skill "${skillName}" from ${PI_AGENT_SKILLS_DIR}\n`,
+      `[paperclip] Removed maintainer-only Pi skill "${skillName}" from ${skillsHome}\n`,
     );
   }
 
   for (const entry of skillsEntries) {
-    const target = path.join(PI_AGENT_SKILLS_DIR, entry.name);
+    const target = path.join(skillsHome, entry.name);
 
     try {
       const result = await ensurePaperclipSkillSymlink(entry.source, target);
       if (result === "skipped") continue;
       await onLog(
         "stderr",
-        `[paperclip] ${result === "repaired" ? "Repaired" : "Injected"} Pi skill "${entry.name}" into ${PI_AGENT_SKILLS_DIR}\n`,
+        `[paperclip] ${result === "repaired" ? "Repaired" : "Injected"} Pi skill "${entry.name}" into ${skillsHome}\n`,
       );
     } catch (err) {
       await onLog(
         "stderr",
-        `[paperclip] Failed to inject Pi skill "${entry.name}" into ${PI_AGENT_SKILLS_DIR}: ${err instanceof Error ? err.message : String(err)}\n`,
+        `[paperclip] Failed to inject Pi skill "${entry.name}" into ${skillsHome}: ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
   }
@@ -136,12 +151,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     defaultCwd: process.cwd(),
   });
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
-  
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
+  await ensurePiSkillsInjected(onLog, materializedSkillsDir ? { skillsDir: materializedSkillsDir } : {});
+
   // Ensure sessions directory exists
   await ensureSessionsDir();
-  
-  // Inject skills
-  await ensurePiSkillsInjected(onLog);
 
   // Build environment
   const envConfig = parseObject(config.env);
