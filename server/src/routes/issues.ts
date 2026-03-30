@@ -417,7 +417,12 @@ export function issueRoutes(db: Db, storage: StorageService) {
           : null,
       svc.findMentionedProjectIds(issue.id),
       documentsSvc.getIssueDocumentPayload(issue),
-      issueRunGraph.getIssueSummary(issue.id),
+      issueRunGraph.getIssueSummary(
+        issue.id,
+        req.actor.type === "agent"
+          ? { type: "agent", agentId: req.actor.agentId }
+          : { type: "board" },
+      ),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -451,7 +456,12 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const orchestration = await issueRunGraph.getIssueSummary(issue.id);
+    const orchestration = await issueRunGraph.getIssueSummary(
+      issue.id,
+      req.actor.type === "agent"
+        ? { type: "agent", agentId: req.actor.agentId }
+        : { type: "board" },
+    );
     res.json(orchestration);
   });
 

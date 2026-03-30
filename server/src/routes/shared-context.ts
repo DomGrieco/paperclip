@@ -17,13 +17,19 @@ export function sharedContextRoutes(db: Db) {
   router.get("/companies/:companyId/shared-context", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    const items = await svc.list(companyId, {
-      projectId: req.query.projectId as string | undefined,
-      issueId: req.query.issueId as string | undefined,
-      sourceAgentId: req.query.sourceAgentId as string | undefined,
-      status: req.query.status as SharedContextPublicationStatus | undefined,
-      visibility: req.query.visibility as SharedContextPublicationVisibility | undefined,
-    });
+    const items = await svc.listAuthorized(
+      companyId,
+      {
+        projectId: req.query.projectId as string | undefined,
+        issueId: req.query.issueId as string | undefined,
+        sourceAgentId: req.query.sourceAgentId as string | undefined,
+        status: req.query.status as SharedContextPublicationStatus | undefined,
+        visibility: req.query.visibility as SharedContextPublicationVisibility | undefined,
+      },
+      req.actor.type === "agent"
+        ? { type: "agent", agentId: req.actor.agentId }
+        : { type: "board" },
+    );
     res.json(items);
   });
 

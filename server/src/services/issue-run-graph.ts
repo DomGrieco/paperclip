@@ -488,7 +488,10 @@ export function issueRunGraphService(db: Db) {
     return retryWorker;
   }
 
-  async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
+  async function getIssueSummary(
+    issueId: string,
+    sharedContextActor?: { type: "board" } | { type: "agent"; agentId?: string | null },
+  ): Promise<IssueOrchestrationSummary> {
     return db.transaction(async (tx) => {
       const scopedEvidence = issueRunEvidenceService(tx as unknown as Db);
       const scopedSharedContext = sharedContextService(tx as unknown as Db);
@@ -526,9 +529,15 @@ export function issueRunGraphService(db: Db) {
         .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
 
       const evidenceBundle = await scopedEvidence.getIssueEvidenceBundle(issue.id);
-      const issueSharedContextPublications = await scopedSharedContext.list(issue.companyId, {
-        issueId: issue.id,
-      });
+      const issueSharedContextPublications = sharedContextActor
+        ? await scopedSharedContext.listAuthorized(
+            issue.companyId,
+            { issueId: issue.id },
+            sharedContextActor,
+          )
+        : await scopedSharedContext.list(issue.companyId, {
+            issueId: issue.id,
+          });
       const rootRunId =
         runs.find((run) => run.runType === "planner")?.id ??
         runs.find((run) => run.graphDepth === 0)?.id ??
