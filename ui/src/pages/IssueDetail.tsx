@@ -7,6 +7,7 @@ import { heartbeatsApi } from "../api/heartbeats";
 import { agentsApi } from "../api/agents";
 import { authApi } from "../api/auth";
 import { projectsApi } from "../api/projects";
+import { sharedContextApi } from "../api/shared-context";
 import { useCompany } from "../context/CompanyContext";
 import { usePanel } from "../context/PanelContext";
 import { useToast } from "../context/ToastContext";
@@ -503,6 +504,26 @@ export function IssueDetail() {
     },
   });
 
+  const updateSharedContextStatus = useMutation({
+    mutationFn: async ({ publicationId, status }: { publicationId: string; status: "published" | "archived" }) => {
+      if (!selectedCompanyId) throw new Error("No company selected");
+      return sharedContextApi.updateStatus(selectedCompanyId, publicationId, status);
+    },
+    onSuccess: (_, variables) => {
+      invalidateIssue();
+      pushToast({
+        title: variables.status === "published" ? "Shared context published" : "Shared context archived",
+        tone: "success",
+      });
+    },
+    onError: (err) => {
+      pushToast({
+        title: err instanceof Error ? err.message : "Failed to update shared context",
+        tone: "error",
+      });
+    },
+  });
+
   const addComment = useMutation({
     mutationFn: ({ body, reopen }: { body: string; reopen?: boolean }) =>
       issuesApi.addComment(issueId!, body, reopen),
@@ -913,7 +934,19 @@ export function IssueDetail() {
         missingBehavior="placeholder"
       />
 
-      <IssueRunGraphCard orchestration={effectiveOrchestration} runLinks={orchestrationRunLinks} />
+      <IssueRunGraphCard
+        orchestration={effectiveOrchestration}
+        runLinks={orchestrationRunLinks}
+        onPublishSharedContext={(publicationId) =>
+          updateSharedContextStatus.mutate({ publicationId, status: "published" })
+        }
+        onArchiveSharedContext={(publicationId) =>
+          updateSharedContextStatus.mutate({ publicationId, status: "archived" })
+        }
+        pendingSharedContextId={
+          updateSharedContextStatus.isPending ? (updateSharedContextStatus.variables?.publicationId ?? null) : null
+        }
+      />
 
       <IssueDocumentsSection
         issue={issue}

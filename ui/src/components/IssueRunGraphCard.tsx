@@ -1,9 +1,10 @@
 import type { IssueOrchestrationSummary, SharedContextPublication } from "@paperclipai/shared";
-import { BookMarked, GitBranchPlus, ShieldCheck, Wrench } from "lucide-react";
+import { Archive, BookMarked, GitBranchPlus, Loader2, ShieldCheck, Upload, Wrench } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateTime } from "../lib/utils";
 import { Link } from "../lib/router";
 import { IssueEvidenceBundleCard } from "./IssueEvidenceBundle";
+import { Button } from "./ui/button";
 
 function humanize(value: string) {
   return value
@@ -125,8 +126,14 @@ function publicationPreview(publication: SharedContextPublication) {
 
 function IssueSharedContextCard({
   publications,
+  onPublish,
+  onArchive,
+  pendingPublicationId,
 }: {
   publications: SharedContextPublication[];
+  onPublish?: (publicationId: string) => void;
+  onArchive?: (publicationId: string) => void;
+  pendingPublicationId?: string | null;
 }) {
   if (publications.length === 0) return null;
 
@@ -147,54 +154,88 @@ function IssueSharedContextCard({
       </div>
 
       <div className="space-y-3 px-4 py-4">
-        {publications.map((publication) => (
-          <div key={publication.id} className="rounded-lg border border-border/60 bg-background/60 px-3 py-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300">
-                <BookMarked className="h-3.5 w-3.5" />
-              </span>
-              <span className="text-sm font-medium text-foreground">{publication.title}</span>
-              <StatusBadge status={publication.status} />
-              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {visibilityLabel(publication.visibility)}
-              </span>
-              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {freshnessLabel(publication.freshness)}
-              </span>
-            </div>
-            <div className="mt-2 text-sm leading-6 text-foreground">{publicationPreview(publication)}</div>
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              {publication.sourceAgentId ? (
-                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
-                  Agent {publication.sourceAgentId.slice(0, 8)}
+        {publications.map((publication) => {
+          const pending = pendingPublicationId === publication.id;
+          const canPublish = publication.status === "proposed" && Boolean(onPublish);
+          const canArchive = publication.status !== "archived" && Boolean(onArchive);
+
+          return (
+            <div key={publication.id} className="rounded-lg border border-border/60 bg-background/60 px-3 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300">
+                  <BookMarked className="h-3.5 w-3.5" />
                 </span>
-              ) : null}
-              {publication.createdByRunId ? (
-                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
-                  Run {publication.createdByRunId.slice(0, 8)}
+                <span className="text-sm font-medium text-foreground">{publication.title}</span>
+                <StatusBadge status={publication.status} />
+                <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {visibilityLabel(publication.visibility)}
                 </span>
-              ) : null}
-              {typeof publication.provenance?.source === "string" && publication.provenance.source.trim().length > 0 ? (
+                <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {freshnessLabel(publication.freshness)}
+                </span>
+              </div>
+              <div className="mt-2 text-sm leading-6 text-foreground">{publicationPreview(publication)}</div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                {publication.sourceAgentId ? (
+                  <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
+                    Agent {publication.sourceAgentId.slice(0, 8)}
+                  </span>
+                ) : null}
+                {publication.createdByRunId ? (
+                  <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
+                    Run {publication.createdByRunId.slice(0, 8)}
+                  </span>
+                ) : null}
+                {typeof publication.provenance?.source === "string" && publication.provenance.source.trim().length > 0 ? (
+                  <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                    Source {humanize(publication.provenance.source)}
+                  </span>
+                ) : null}
                 <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
-                  Source {humanize(publication.provenance.source)}
+                  Freshness {freshnessLabel(publication.freshness)}
                 </span>
+                {publication.confidence !== null ? (
+                  <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                    Confidence {Math.round(publication.confidence * 100)}%
+                  </span>
+                ) : null}
+                {publication.tags.map((tag) => (
+                  <span key={tag} className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+              {canPublish || canArchive ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
+                  {canPublish ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={pending}
+                      onClick={() => onPublish?.(publication.id)}
+                    >
+                      {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                      Publish to shared recall
+                    </Button>
+                  ) : null}
+                  {canArchive ? (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={pending}
+                      onClick={() => onArchive?.(publication.id)}
+                    >
+                      {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Archive className="h-3 w-3" />}
+                      Archive context
+                    </Button>
+                  ) : null}
+                </div>
               ) : null}
-              <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
-                Freshness {freshnessLabel(publication.freshness)}
-              </span>
-              {publication.confidence !== null ? (
-                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
-                  Confidence {Math.round(publication.confidence * 100)}%
-                </span>
-              ) : null}
-              {publication.tags.map((tag) => (
-                <span key={tag} className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
-                  #{tag}
-                </span>
-              ))}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -213,9 +254,15 @@ function countByType(orchestration: IssueOrchestrationSummary) {
 export function IssueRunGraphCard({
   orchestration,
   runLinks,
+  onPublishSharedContext,
+  onArchiveSharedContext,
+  pendingSharedContextId,
 }: {
   orchestration: IssueOrchestrationSummary | null | undefined;
   runLinks?: Map<string, string>;
+  onPublishSharedContext?: (publicationId: string) => void;
+  onArchiveSharedContext?: (publicationId: string) => void;
+  pendingSharedContextId?: string | null;
 }) {
   if (!orchestration) return null;
 
@@ -367,7 +414,12 @@ export function IssueRunGraphCard({
         }
       />
 
-      <IssueSharedContextCard publications={issueSharedContextPublications} />
+      <IssueSharedContextCard
+        publications={issueSharedContextPublications}
+        onPublish={onPublishSharedContext}
+        onArchive={onArchiveSharedContext}
+        pendingPublicationId={pendingSharedContextId}
+      />
     </div>
   );
 }
