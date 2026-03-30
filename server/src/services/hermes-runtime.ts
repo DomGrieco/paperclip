@@ -112,20 +112,48 @@ function defaultModelForProvider(provider: string | null): string | null {
   return null;
 }
 
-function buildPromptTemplate(existingPromptTemplate: string | null): string {
-  if (!existingPromptTemplate) {
-    return DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE;
-  }
-  if (existingPromptTemplate.includes(RUNTIME_NOTE_MARKER)) {
-    return existingPromptTemplate;
-  }
-  return `${RUNTIME_NOTE_MARKER}
+function appendWorkerResultContract(promptTemplate: string, runtimeBundle: RuntimeBundle | null | undefined): string {
+  const runType = readString(runtimeBundle?.run?.runType);
+  const currentSubtask = parseObject(runtimeBundle?.swarm?.currentSubtask);
+  if (runType !== "worker" || !currentSubtask) return promptTemplate;
+
+  const taskKey = readString(currentSubtask.taskKey) ?? readString(currentSubtask.id) ?? "worker-subtask";
+  const expectedArtifacts = Array.isArray(currentSubtask.expectedArtifacts)
+    ? JSON.stringify(currentSubtask.expectedArtifacts)
+    : "[]";
+  const acceptanceChecks = Array.isArray(currentSubtask.acceptanceChecks)
+    ? JSON.stringify(currentSubtask.acceptanceChecks)
+    : "[]";
+  return `${promptTemplate}
+
+## Worker completion contract
+- This run is a swarm worker for subtask \`${taskKey}\`.
+- Required expected artifacts for this subtask: ${expectedArtifacts}
+- Acceptance checks for this subtask: ${acceptanceChecks}
+- Before finishing, emit exactly one final machine-readable block in your final response using this format:
+  PAPERCLIP_RESULT_JSON_START
+  {"childOutput":{"summary":"concise evidence-backed summary of what was completed","status":"completed","notes":["optional concrete note"],"artifactClaims":[{"kind":"summary","label":"optional human-readable label","detail":"optional location or evidence detail"}]}}
+  PAPERCLIP_RESULT_JSON_END
+- Use valid JSON only inside that block. No markdown fences, comments, or trailing prose inside the block.
+- Allowed child output status values are exactly \`completed\` or \`blocked\`.
+- The \`summary\` field is required and must be non-empty.
+- The \`artifactClaims\` list must name the concrete artifact kinds you actually produced for this subtask. Allowed artifact kinds are exactly: \`summary\`, \`patch\`, \`test_result\`, \`comment\`, \`document\`.
+- Match your artifact claims to the subtask's expected artifacts. If the task is validation-only, still emit a structured block describing the concrete evidence you produced.
+- Put any longer human-readable explanation outside the JSON block.`;
+}
+
+function buildPromptTemplate(existingPromptTemplate: string | null, runtimeBundle: RuntimeBundle | null | undefined): string {
+  const basePrompt = !existingPromptTemplate
+    ? DEFAULT_HERMES_PAPERCLIP_PROMPT_TEMPLATE
+    : existingPromptTemplate.includes(RUNTIME_NOTE_MARKER)
+      ? existingPromptTemplate
+      : `${RUNTIME_NOTE_MARKER}
 - Use \`$PAPERCLIP_API_HELPER_PATH\` for Paperclip API calls whenever it is available. It automatically attaches auth headers and prints JSON/text responses.
 - \`$PAPERCLIP_API_HELPER_PATH\` already uses the configured \`$PAPERCLIP_API_URL\`. Do not re-export or rewrite \`PAPERCLIP_API_URL\` before helper calls.
 - \`$PAPERCLIP_API_URL\` points at the Paperclip server root. Keep helper targets as \`/api/...\` paths instead of appending another base prefix yourself.
 - Only fall back to raw \`curl\` if the helper is unavailable or clearly insufficient.
 - Use \`{{paperclipApiUrl}}\` as the Paperclip API base URL.
-- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer $PAPER...Y"\` on every Paperclip API request.
+- If you must fall back to raw HTTP, include \`-H "Authorization: Bearer *** on every Paperclip API request.
 - If \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\` is set, read it first with your file tools. The files under \`$PAPERCLIP_RUNTIME_ROOT\` are the Paperclip control-plane source of truth for this run.
 - If \`$PAPERCLIP_SHARED_CONTEXT_PATH\` is set, read it as the governed shared context packet before acting.
 - Limit your initial file reads to \`$PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH\`, \`$PAPERCLIP_RUNTIME_BUNDLE_PATH\`, and \`$PAPERCLIP_SHARED_CONTEXT_PATH\`. Do not expand into \`policy.json\`, \`runner.json\`, \`verification.json\`, broad file discovery, or repeated re-reads unless the task explicitly requires it or those files point you there.
@@ -171,6 +199,8 @@ Title: {{taskTitle}}
 2. If an issue is available, pick the highest-priority one, work it, and update its status when complete.
 3. If nothing is assigned, exit briefly and clearly.
 {{/noTask}}`;
+
+  return appendWorkerResultContract(basePrompt, runtimeBundle);
 }
 
 async function materializePaperclipApiHelper(runtimeRoot: string): Promise<string> {
@@ -701,6 +731,6 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   }
 
   nextConfig.env = env;
-  nextConfig.promptTemplate = buildPromptTemplate(readString(input.config.promptTemplate));
+  nextConfig.promptTemplate = buildPromptTemplate(readString(input.config.promptTemplate), input.runtimeBundle);
   return nextConfig;
 }

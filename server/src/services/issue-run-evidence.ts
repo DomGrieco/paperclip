@@ -138,6 +138,29 @@ function readRequiredArtifactKinds(subtask: SwarmSubtask | null): SwarmArtifactK
     .filter((kind): kind is SwarmArtifactKind => typeof kind === "string" && kind.trim().length > 0);
 }
 
+function buildArtifactReportsFromStructuredChildOutput(input: {
+  issueId: string | null;
+  resultJson: Record<string, unknown> | null | undefined;
+  role?: string | null;
+}): AdapterArtifactReport[] {
+  const childOutput = readStructuredChildOutput(input.resultJson);
+  if (!childOutput?.artifactClaims?.length) return [];
+
+  return childOutput.artifactClaims.map((claim) => ({
+    issueId: input.issueId,
+    artifactKind: claim.kind,
+    role: input.role ?? null,
+    label: claim.label ?? null,
+    metadata: {
+      source: "structured_child_output_claim",
+      ...(claim.detail ? { detail: claim.detail } : {}),
+      summary: childOutput.summary,
+      ...(childOutput.status ? { status: childOutput.status } : {}),
+      ...(childOutput.notes?.length ? { notes: childOutput.notes } : {}),
+    },
+  }));
+}
+
 function summarizeSynthesis(decisions: SwarmReviewerDecisionRecord[]): string {
   const accepted = decisions.filter((decision) => decision.decision === "accept");
   const repair = decisions.filter((decision) => decision.decision === "request_repair");
@@ -260,10 +283,22 @@ export function issueRunEvidenceService(db: Db) {
   }) {
     if (input.artifacts.length === 0) return [];
 
+    const existing = await listRunArtifacts(input.runId);
+    const existingKeys = new Set(
+      existing.map((artifact) => `${artifact.artifactKind}::${artifact.label ?? ""}::${artifact.role ?? ""}`),
+    );
+    const artifactsToInsert = input.artifacts.filter((artifact) => {
+      const key = `${artifact.artifactKind}::${artifact.label ?? ""}::${artifact.role ?? ""}`;
+      if (existingKeys.has(key)) return false;
+      existingKeys.add(key);
+      return true;
+    });
+    if (artifactsToInsert.length === 0) return [];
+
     return db
       .insert(heartbeatRunArtifacts)
       .values(
-        input.artifacts.map((artifact) => ({
+        artifactsToInsert.map((artifact) => ({
           companyId: input.companyId,
           runId: input.runId,
           issueId: artifact.issueId ?? input.issueId,
@@ -277,6 +312,27 @@ export function issueRunEvidenceService(db: Db) {
         })),
       )
       .returning();
+  }
+
+  async function persistStructuredChildOutputArtifacts(input: {
+    companyId: string;
+    runId: string;
+    issueId: string | null;
+    resultJson: Record<string, unknown> | null | undefined;
+    role?: string | null;
+  }) {
+    const artifacts = buildArtifactReportsFromStructuredChildOutput({
+      issueId: input.issueId,
+      resultJson: input.resultJson,
+      role: input.role,
+    });
+    if (artifacts.length === 0) return [];
+    return persistReportedRunArtifacts({
+      companyId: input.companyId,
+      runId: input.runId,
+      issueId: input.issueId,
+      artifacts,
+    });
   }
 
   async function syncVerificationOutcome(runId: string) {
@@ -351,10 +407,17 @@ export function issueRunEvidenceService(db: Db) {
     let pending = false;
 
     for (const worker of workers) {
+      const subtask = readSwarmSubtask(worker.contextSnapshot);
+      await persistStructuredChildOutputArtifacts({
+        companyId: worker.companyId,
+        runId: worker.id,
+        issueId: readIssueId(worker.contextSnapshot),
+        resultJson: worker.resultJson,
+        role: subtask?.kind ?? null,
+      });
       const artifacts = await listRunArtifacts(worker.id);
       const artifactItems = artifacts.map(toArtifactItem);
       const childOutput = readStructuredChildOutput(worker.resultJson);
-      const subtask = readSwarmSubtask(worker.contextSnapshot);
       const requiredArtifactKinds = readRequiredArtifactKinds(subtask);
       const presentKinds = new Set(artifactItems.map((artifact) => artifact.artifactKind));
       const missingRequiredArtifactKinds = requiredArtifactKinds.filter((kind) => !presentKinds.has(kind));

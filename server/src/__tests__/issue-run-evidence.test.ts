@@ -600,4 +600,103 @@ describe("issue run evidence", () => {
     });
   }, 20_000);
 
+  it("materializes structured child-output artifact claims into heartbeat run artifacts for planner review", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+    const evidence = issueRunEvidenceService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Verifier",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Structured child artifacts",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const [worker] = await db.insert(heartbeatRuns).values({
+      companyId: company.id,
+      agentId: agent.id,
+      status: "succeeded",
+      invocationSource: "assignment",
+      triggerDetail: "system",
+      runType: "worker",
+      rootRunId: planner.id,
+      parentRunId: planner.id,
+      graphDepth: 1,
+      repairAttempt: 0,
+      resultJson: {
+        childOutput: {
+          summary: "Validated structured artifact persistence.",
+          status: "completed",
+          artifactClaims: [
+            { kind: "comment", label: "validation-comment", detail: "Issue comment with concrete evidence." },
+            { kind: "test_result", label: "validation-test", detail: "Observed accepted child output." },
+          ],
+        },
+      },
+      contextSnapshot: {
+        issueId: issue.id,
+        taskKey: "structured-artifact-check",
+        swarmSubtask: {
+          id: "structured-artifact-check",
+          kind: "verification",
+          title: "Check structured child artifacts",
+          goal: "Persist artifact claims for planner review.",
+          expectedArtifacts: [
+            { kind: "comment", required: true },
+            { kind: "test_result", required: true },
+          ],
+          acceptanceChecks: ["Planner accepts the worker child output"],
+          recommendedModelTier: "balanced",
+        },
+      },
+    }).returning();
+
+    const synthesis = await evidence.synthesizePlannerReview(planner.id);
+    const artifacts = await db
+      .select()
+      .from(heartbeatRunArtifacts)
+      .where(eq(heartbeatRunArtifacts.runId, worker.id));
+
+    expect(artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactKind: "comment",
+          label: "validation-comment",
+          role: "verification",
+          metadata: expect.objectContaining({ source: "structured_child_output_claim" }),
+        }),
+        expect.objectContaining({
+          artifactKind: "test_result",
+          label: "validation-test",
+          role: "verification",
+          metadata: expect.objectContaining({ source: "structured_child_output_claim" }),
+        }),
+      ]),
+    );
+    expect(synthesis?.reviewerDecisions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskKey: "structured-artifact-check",
+          decision: "accept",
+          reasons: ["accepted"],
+        }),
+      ]),
+    );
+  }, 20_000);
+
 });

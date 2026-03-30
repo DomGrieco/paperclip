@@ -180,6 +180,53 @@ describe("buildPrompt", () => {
     expect(prompt).toContain("Allowed artifact kinds are exactly");
     expect(prompt).toContain("`read_only` or `advisory`");
   });
+
+  it("adds a worker completion contract for swarm worker runs with a current subtask", () => {
+    const prompt = buildPrompt(
+      buildContext({
+        context: {
+          paperclipRuntimeBundle: {
+            issue: {
+              id: "issue-77",
+              title: "Worker evidence validation",
+            },
+            run: {
+              id: "run-worker-1",
+              runType: "worker",
+              rootRunId: "run-planner-1",
+              parentRunId: "run-planner-1",
+            },
+            swarm: {
+              plan: null,
+              currentSubtask: {
+                id: "subtask-verify",
+                kind: "verification",
+                title: "Verify overlap",
+                goal: "Produce overlap proof and evidence.",
+                taskKey: "verify-overlap",
+                expectedArtifacts: [
+                  { kind: "test_result", required: true },
+                  { kind: "comment", required: true },
+                ],
+                acceptanceChecks: ["Evidence cites run ids"],
+                recommendedModelTier: "balanced",
+              },
+            },
+          },
+        },
+      }),
+      {},
+    );
+
+    expect(prompt).toContain("## Worker completion contract");
+    expect(prompt).toContain("swarm worker for subtask `verify-overlap`");
+    expect(prompt).toContain("Required expected artifacts for this subtask: [{\"kind\":\"test_result\",\"required\":true},{\"kind\":\"comment\",\"required\":true}]");
+    expect(prompt).toContain("Acceptance checks for this subtask: [\"Evidence cites run ids\"]");
+    expect(prompt).toContain("\"childOutput\"");
+    expect(prompt).toContain("artifactClaims");
+    expect(prompt).toContain("Allowed child output status values are exactly `completed` or `blocked`");
+    expect(prompt).toContain("Allowed artifact kinds are exactly: `summary`, `patch`, `test_result`, `comment`, `document`");
+  });
 });
 
 describe("parseHermesOutput", () => {

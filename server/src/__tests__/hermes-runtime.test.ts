@@ -442,6 +442,58 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(promptTemplate).toContain("Check your assigned todo issues");
   });
 
+  it("appends a worker completion contract when the runtime bundle identifies a swarm worker subtask", async () => {
+    const cwd = await makeTempDir();
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {},
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        run: {
+          id: "run-worker-2",
+          runType: "worker",
+          rootRunId: "run-planner-1",
+          parentRunId: "run-planner-1",
+          graphDepth: 1,
+          repairAttempt: 0,
+          verificationVerdict: null,
+        },
+        swarm: {
+          plan: null,
+          currentSubtask: {
+            id: "verify-overlap",
+            kind: "verification",
+            title: "Verify overlap evidence",
+            goal: "Produce concrete overlap validation evidence.",
+            taskKey: "verify-overlap",
+            ownershipMode: "read_only",
+            acceptanceChecks: ["Evidence cites both worker ids"],
+            expectedArtifacts: [
+              { kind: "test_result", required: true },
+              { kind: "comment", required: true },
+            ],
+            recommendedModelTier: "balanced",
+            budgetCents: 25,
+            maxRuntimeSec: 900,
+          },
+        },
+      }),
+      authToken: null,
+      managedRuntime: makeManagedRuntime(cwd),
+    });
+
+    const promptTemplate = String(nextConfig.promptTemplate);
+    expect(promptTemplate).toContain("## Worker completion contract");
+    expect(promptTemplate).toContain("swarm worker for subtask `verify-overlap`");
+    expect(promptTemplate).toContain("Required expected artifacts for this subtask: [{\"kind\":\"test_result\",\"required\":true},{\"kind\":\"comment\",\"required\":true}]");
+    expect(promptTemplate).toContain("Acceptance checks for this subtask: [\"Evidence cites both worker ids\"]");
+    expect(promptTemplate).toContain("PAPERCLIP_RESULT_JSON_START");
+    expect(promptTemplate).toContain("\"childOutput\"");
+    expect(promptTemplate).toContain("artifactClaims");
+    expect(promptTemplate).toContain("Allowed child output status values are exactly `completed` or `blocked`");
+  });
+
   it("materializes a governed helper policy for validation-shaped issue runs", async () => {
     const cwd = await makeTempDir();
     const sharedSource = await makeTempDir();

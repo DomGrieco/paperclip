@@ -151,6 +151,37 @@ function appendPlannerResultContract(renderedPrompt: string, runtimeBundle: Reco
 - Never call speculative endpoints like \`POST /api/issues/{issueId}/runs\`; they are not the planner fan-out contract.`;
 }
 
+function appendWorkerResultContract(renderedPrompt: string, runtimeBundle: Record<string, unknown> | undefined): string {
+  const run = cfgRecord(runtimeBundle?.run);
+  const swarm = cfgRecord(runtimeBundle?.swarm);
+  const currentSubtask = cfgRecord(swarm?.currentSubtask);
+  if (cfgString(run?.runType) !== "worker" || !currentSubtask) return renderedPrompt;
+
+  const taskKey = cfgString(currentSubtask.taskKey) ?? cfgString(currentSubtask.id) ?? "worker-subtask";
+  const expectedArtifacts = Array.isArray(currentSubtask.expectedArtifacts)
+    ? JSON.stringify(currentSubtask.expectedArtifacts)
+    : "[]";
+  const acceptanceChecks = Array.isArray(currentSubtask.acceptanceChecks)
+    ? JSON.stringify(currentSubtask.acceptanceChecks)
+    : "[]";
+  return `${renderedPrompt}
+
+## Worker completion contract
+- This run is a swarm worker for subtask \`${taskKey}\`.
+- Required expected artifacts for this subtask: ${expectedArtifacts}
+- Acceptance checks for this subtask: ${acceptanceChecks}
+- Before finishing, emit exactly one final machine-readable block in your final response using this format:
+  ${PAPERCLIP_RESULT_JSON_START}
+  {"childOutput":{"summary":"concise evidence-backed summary of what was completed","status":"completed","notes":["optional concrete note"],"artifactClaims":[{"kind":"summary","label":"optional human-readable label","detail":"optional location or evidence detail"}]}}
+  ${PAPERCLIP_RESULT_JSON_END}
+- Use valid JSON only inside that block. No markdown fences, comments, or trailing prose inside the block.
+- Allowed child output status values are exactly \`completed\` or \`blocked\`.
+- The \`summary\` field is required and must be non-empty.
+- The \`artifactClaims\` list must name the concrete artifact kinds you actually produced for this subtask. Allowed artifact kinds are exactly: \`summary\`, \`patch\`, \`test_result\`, \`comment\`, \`document\`.
+- Match your artifact claims to the subtask's expected artifacts. If the task is validation-only, still emit a structured block describing the concrete evidence you produced.
+- Put any longer human-readable explanation outside the JSON block.`;
+}
+
 export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string, unknown>): string {
   const template = cfgString(config.promptTemplate) || DEFAULT_PROMPT_TEMPLATE;
   const runtimeBundle = cfgRecord(ctx.context?.paperclipRuntimeBundle);
@@ -193,7 +224,8 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string,
   let rendered = template;
   rendered = rendered.replace(/\{\{#taskId\}\}([\s\S]*?)\{\{\/taskId\}\}/g, taskId ? "$1" : "");
   rendered = rendered.replace(/\{\{#noTask\}\}([\s\S]*?)\{\{\/noTask\}\}/g, taskId ? "" : "$1");
-  const renderedPrompt = appendPlannerResultContract(renderTemplate(rendered, vars), runtimeBundle);
+  const plannerPrompt = appendPlannerResultContract(renderTemplate(rendered, vars), runtimeBundle);
+  const renderedPrompt = appendWorkerResultContract(plannerPrompt, runtimeBundle);
   if (!apiPolicySummary) return renderedPrompt;
   return `${renderedPrompt}\n\n## Governed API contract\n${apiPolicySummary}\nAny helper call outside this contract will be rejected before it reaches the Paperclip API.`;
 }
