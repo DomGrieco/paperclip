@@ -48,9 +48,11 @@ import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
 import { resolveSwarmAdapterConfigOverride } from "./swarm-policy.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
+import { prepareCodexAdapterConfigForExecution, injectCodexContainerExecConfig } from "./codex-runtime.js";
 import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
-import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
+import { buildAgentContainerLaunchPlan } from "./agent-container-plan.js";
+import { injectAgentContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
@@ -2143,7 +2145,7 @@ export function heartbeatService(db: Db) {
           })
         : null;
     attachRuntimeBundleToContext(context, runtimeBundle);
-    const executionConfig =
+    let executionConfig =
       agent.adapterType === "hermes_local"
         ? await prepareHermesAdapterConfigForExecution({
             config: resolvedConfig,
@@ -2162,7 +2164,11 @@ export function heartbeatService(db: Db) {
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
             persistedBootstrap: await hermesBootstrapProfileService(db).getStoredProfile(agent.companyId),
           })
-        : resolvedConfig;
+        : agent.adapterType === "codex_local"
+          ? await prepareCodexAdapterConfigForExecution({
+              config: resolvedConfig,
+            })
+          : resolvedConfig;
     const hermesContainerPlan = agent.adapterType === "hermes_local"
       ? buildHermesContainerLaunchPlan({
           runId: run.id,
@@ -2172,14 +2178,26 @@ export function heartbeatService(db: Db) {
           runtimeBundle,
         })
       : null;
+    const agentContainerPlan =
+      hermesContainerPlan ??
+      (agent.adapterType === "codex_local"
+        ? buildAgentContainerLaunchPlan({
+            adapterType: agent.adapterType,
+            runId: run.id,
+            agentId: agent.id,
+            executionWorkspaceCwd: executionWorkspace.cwd,
+            executionConfig,
+            runtimeBundle,
+          })
+        : null);
     if (hermesContainerPlan) {
       context.paperclipHermesContainerPlan = hermesContainerPlan;
     } else {
       delete context.paperclipHermesContainerPlan;
     }
-    const executionConfigWithRuntimeLaunch = injectHermesContainerLauncherService({
+    const executionConfigWithRuntimeLaunch = injectAgentContainerLauncherService({
       config: executionConfig,
-      plan: hermesContainerPlan,
+      plan: agentContainerPlan,
     });
     attachPaperclipSharedContextPacketToContext(context, {
       runtimeBundle,
@@ -2390,6 +2408,16 @@ export function heartbeatService(db: Db) {
             `[paperclip] Failed to post workspace-ready comment: ${err instanceof Error ? err.message : String(err)}\n`,
           );
         }
+      }
+      if (agent.adapterType === "codex_local" && agentContainerPlan) {
+        const launchedContainerId = runtimeServices.find(
+          (service) => service.provider === "agent_container" && readNonEmptyString(service.providerRef),
+        )?.providerRef ?? null;
+        executionConfig = injectCodexContainerExecConfig({
+          config: executionConfig,
+          plan: agentContainerPlan,
+          containerId: launchedContainerId,
+        });
       }
       const onAdapterMeta = async (meta: AdapterInvocationMeta) => {
         if (meta.env && secretKeys.size > 0) {

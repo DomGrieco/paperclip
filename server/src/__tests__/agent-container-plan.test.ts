@@ -156,4 +156,53 @@ describe("buildAgentContainerLaunchPlan", () => {
       ]),
     );
   });
+
+  it("remaps Codex managed runtime paths into the codex worker container", () => {
+    const plan = buildAgentContainerLaunchPlan({
+      adapterType: "codex_local",
+      runId: "run-codex",
+      agentId: "agent-codex",
+      executionWorkspaceCwd: "/tmp/paperclip/workspaces/codex-1",
+      runtimeBundle: buildRuntimeBundle(),
+      executionConfig: {
+        command: "/tmp/paperclip/runtime-cache/codex_local/channels/stable/installs/current/bin/codex",
+        env: {
+          CODEX_HOME: "/tmp/paperclip/workspaces/codex-1/.paperclip/codex-home",
+          PAPERCLIP_RUNTIME_ROOT: "/tmp/paperclip/workspaces/codex-1/.paperclip/runtime",
+          PAPERCLIP_RUNTIME_BUNDLE_PATH: "/tmp/paperclip/workspaces/codex-1/.paperclip/runtime/bundle.json",
+          PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: "/tmp/paperclip/workspaces/codex-1/.paperclip/runtime/instructions.md",
+          PAPERCLIP_API_HELPER_PATH: "/tmp/paperclip/workspaces/codex-1/.paperclip/runtime/paperclip-api",
+          PAPERCLIP_SHARED_CONTEXT_PATH: "/tmp/paperclip/workspaces/codex-1/.paperclip/context/shared-context.json",
+          PAPERCLIP_CODEX_MANAGED_RUNTIME_ROOT:
+            "/tmp/paperclip/runtime-cache/codex_local/channels/stable/installs/current",
+          PAPERCLIP_CODEX_MANAGED_RUNTIME_COMMAND:
+            "/tmp/paperclip/runtime-cache/codex_local/channels/stable/installs/current/bin/codex",
+        },
+      },
+    });
+
+    expect(plan.runner.provider).toBe("agent_container");
+    expect(plan.command).toEqual(["/paperclip/runtime/codex-managed/bin/codex"]);
+    expect(plan.mounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "agent_home", containerPath: "/home/codex/.codex" }),
+        expect.objectContaining({ kind: "managed_runtime", containerPath: "/paperclip/runtime/codex-managed" }),
+      ]),
+    );
+    expect(plan.env).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "CODEX_HOME", value: "/home/codex/.codex", source: "worker_home" }),
+        expect.objectContaining({
+          name: "PAPERCLIP_CODEX_MANAGED_RUNTIME_ROOT",
+          value: "/paperclip/runtime/codex-managed",
+          source: "managed_runtime",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_CODEX_MANAGED_RUNTIME_COMMAND",
+          value: "/paperclip/runtime/codex-managed/bin/codex",
+          source: "managed_runtime",
+        }),
+      ]),
+    );
+  });
 });
