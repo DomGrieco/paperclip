@@ -8,10 +8,15 @@ import type { AdapterRuntimeServiceReport } from "@paperclipai/adapter-utils";
 import type { Db } from "@paperclipai/db";
 import { workspaceRuntimeServices } from "@paperclipai/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
-import type { HermesContainerLaunchPlan } from "@paperclipai/shared";
+import type { AgentContainerLaunchPlan, HermesContainerLaunchPlan } from "@paperclipai/shared";
 import { asNumber, asString, parseObject, renderTemplate } from "../adapters/utils.js";
 import { resolveHomeAwarePath } from "../home-paths.js";
-import { createAndStartHermesContainer, removeHermesContainer, resolveHermesContainerImage, stableHermesContainerRuntimeServiceId } from "./hermes-container-launcher.js";
+import {
+  createAndStartAgentContainer,
+  removeAgentContainer,
+  resolveHermesContainerImage,
+  stableHermesContainerRuntimeServiceId,
+} from "./hermes-container-launcher.js";
 import type { WorkspaceOperationRecorder } from "./workspace-operations.js";
 
 export interface ExecutionWorkspaceInput {
@@ -1085,7 +1090,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
   });
 }
 
-async function startHermesContainerRuntimeService(input: {
+async function startAgentContainerRuntimeService(input: {
   db?: Db;
   runId: string;
   agent: ExecutionWorkspaceAgentRef;
@@ -1098,8 +1103,10 @@ async function startHermesContainerRuntimeService(input: {
   scopeType: "project_workspace" | "execution_workspace" | "run" | "agent";
   scopeId: string | null;
 }): Promise<RuntimeServiceRecord> {
-  const plan = parseObject(input.service.hermesContainerPlan) as unknown as HermesContainerLaunchPlan;
-  const serviceName = asString(input.service.name, "hermes-worker");
+  const planRecord = parseObject(input.service.agentContainerPlan);
+  const fallbackPlanRecord = parseObject(input.service.hermesContainerPlan);
+  const plan = ((Object.keys(planRecord).length > 0 ? planRecord : fallbackPlanRecord) as unknown) as AgentContainerLaunchPlan;
+  const serviceName = asString(input.service.name, asString(plan.runtimeService?.serviceName, "agent-worker"));
   const preferredImage = asString(plan.image, "paperclip/hermes-worker:dev");
   const image = await resolveHermesContainerImage(preferredImage);
   const serviceId = stableHermesContainerRuntimeServiceId({
@@ -1107,7 +1114,7 @@ async function startHermesContainerRuntimeService(input: {
     serviceName,
     image,
   });
-  const containerId = await createAndStartHermesContainer({
+  const containerId = await createAndStartAgentContainer({
     runId: input.runId,
     agentId: input.agent.id,
     serviceId,
@@ -1115,8 +1122,9 @@ async function startHermesContainerRuntimeService(input: {
     plan,
     workspaceCwd: input.workspace.cwd,
   });
+  const provider = plan.runtimeService?.provider === "agent_container" ? "agent_container" : "hermes_container";
   if (input.onLog) {
-    await input.onLog("stdout", `[service:${serviceName}] launched hermes_container ${containerId} using image ${image}\n`);
+    await input.onLog("stdout", `[service:${serviceName}] launched ${provider} ${containerId} using image ${image}\n`);
   }
   return {
     id: serviceId,
@@ -1135,7 +1143,7 @@ async function startHermesContainerRuntimeService(input: {
     cwd: input.workspace.cwd,
     port: null,
     url: null,
-    provider: "hermes_container",
+    provider,
     providerRef: containerId,
     ownerAgentId: input.agent.id,
     startedByRunId: input.runId,
@@ -1285,8 +1293,8 @@ async function stopRuntimeService(serviceId: string) {
   record.status = "stopped";
   record.lastUsedAt = new Date().toISOString();
   record.stoppedAt = new Date().toISOString();
-  if (record.provider === "hermes_container" && record.providerRef) {
-    await removeHermesContainer(record.providerRef);
+  if ((record.provider === "hermes_container" || record.provider === "agent_container") && record.providerRef) {
+    await removeAgentContainer(record.providerRef);
   } else if (record.child && record.child.pid) {
     terminateChildProcess(record.child);
   }
@@ -1396,8 +1404,8 @@ export async function ensureRuntimeServicesForRun(input: {
       }
 
       const provider = asString(service.provider, "local_process");
-      const record = await (provider === "hermes_container"
-        ? startHermesContainerRuntimeService({
+      const record = await (provider === "hermes_container" || provider === "agent_container"
+        ? startAgentContainerRuntimeService({
             db: input.db,
             runId: input.runId,
             agent: input.agent,
