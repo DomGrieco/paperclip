@@ -62,30 +62,97 @@ export function resolveDefaultAgentWorkspaceDir(agentId: string): string {
   return path.resolve(resolvePaperclipInstanceRoot(), "workspaces", trimmed);
 }
 
+function requireFriendlyPathSegment(value: string, label: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label} path requires ${label}.`);
+  }
+  return sanitizeFriendlyPathSegment(trimmed, label);
+}
+
+function resolveCompanyRoot(companyId: string): string {
+  const trimmed = companyId.trim();
+  if (!trimmed) {
+    throw new Error("Company shared runtime path requires companyId.");
+  }
+  return path.resolve(
+    resolvePaperclipInstanceRoot(),
+    "companies",
+    sanitizeFriendlyPathSegment(trimmed, "company"),
+  );
+}
+
+export function resolveCompanySharedRuntimeRoot(companyId: string): string {
+  return path.resolve(resolveCompanyRoot(companyId), "shared");
+}
+
+export function resolveCompanySharedSkillsRoot(companyId: string): string {
+  return path.resolve(resolveCompanySharedRuntimeRoot(companyId), "managed-skills");
+}
+
+export function resolveCompanySharedContextRoot(companyId: string): string {
+  return path.resolve(resolveCompanySharedRuntimeRoot(companyId), "context");
+}
+
+export function resolveCompanySharedMemoryRoot(companyId: string): string {
+  return path.resolve(resolveCompanySharedRuntimeRoot(companyId), "memory");
+}
+
+export function resolveCompanySharedArtifactsRoot(companyId: string): string {
+  return path.resolve(resolveCompanySharedRuntimeRoot(companyId), "artifacts");
+}
+
+export function resolveAgentRuntimeHomeRoot(companyId: string, agentId: string, adapterType: string): string {
+  const trimmedCompanyId = companyId.trim();
+  const trimmedAgentId = agentId.trim();
+  if (!trimmedCompanyId || !trimmedAgentId) {
+    throw new Error("Agent runtime home path requires companyId and agentId.");
+  }
+  const normalizedAdapterType = requireFriendlyPathSegment(adapterType, "adapterType");
+  return path.resolve(
+    resolveCompanyRoot(trimmedCompanyId),
+    "agents",
+    sanitizeFriendlyPathSegment(trimmedAgentId, "agent"),
+    "homes",
+    normalizedAdapterType,
+  );
+}
+
+export function resolveAdapterRuntimeCacheRoot(adapterType: string): string {
+  const normalizedAdapterType = requireFriendlyPathSegment(adapterType, "adapterType");
+  return path.resolve(resolvePaperclipInstanceRoot(), "runtime-cache", normalizedAdapterType);
+}
+
+export function resolveAdapterRuntimeChannelRoot(adapterType: string, channel: string): string {
+  const normalizedChannel = sanitizeFriendlyPathSegment(channel, "stable");
+  return path.resolve(resolveAdapterRuntimeCacheRoot(adapterType), "channels", normalizedChannel);
+}
+
+export function resolveAdapterRuntimeChannelMetadataPath(adapterType: string, channel: string): string {
+  return path.resolve(resolveAdapterRuntimeChannelRoot(adapterType, channel), "metadata.json");
+}
+
 export function resolveCompanyHermesHomeDir(companyId: string): string {
   const trimmed = companyId.trim();
   if (!trimmed) {
     throw new Error("Managed Hermes home path requires companyId.");
   }
   return path.resolve(
-    resolvePaperclipInstanceRoot(),
-    "companies",
-    sanitizeFriendlyPathSegment(trimmed, "company"),
+    resolveCompanyRoot(trimmed),
     "hermes-home",
   );
 }
 
 export function resolveHermesRuntimeCacheRoot(): string {
-  return path.resolve(resolvePaperclipInstanceRoot(), "runtime-cache", "hermes");
+  return resolveAdapterRuntimeCacheRoot("hermes");
 }
 
 export function resolveHermesRuntimeChannelRoot(channel: string): string {
-  const normalized = sanitizeFriendlyPathSegment(channel, "stable");
-  return path.resolve(resolveHermesRuntimeCacheRoot(), "channels", normalized);
+  return resolveAdapterRuntimeChannelRoot("hermes", channel);
 }
 
 export function resolveHermesRuntimeChannelMetadataPath(channel: string): string {
-  return path.resolve(resolveHermesRuntimeChannelRoot(channel), "metadata.json");
+  return resolveAdapterRuntimeChannelMetadataPath("hermes", channel);
 }
 
 function sanitizeFriendlyPathSegment(value: string | null | undefined, fallback = "_default"): string {
