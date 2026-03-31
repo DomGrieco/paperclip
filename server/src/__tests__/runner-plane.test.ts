@@ -132,4 +132,55 @@ describe("runner-plane", () => {
       isolationBoundary: "container_process",
     });
   });
+
+  it("upgrades the observed runner snapshot for generic agent container runtime services", () => {
+    const planned = resolvePlannedRunnerSnapshot({
+      defaultMode: "isolated_workspace",
+      workspaceStrategy: { type: "git_worktree" },
+    });
+
+    expect(
+      resolveObservedRunnerSnapshot({
+        planned,
+        runtimeServices: [
+          {
+            id: "svc-2",
+            companyId: "company-1",
+            projectId: null,
+            projectWorkspaceId: null,
+            executionWorkspaceId: null,
+            issueId: null,
+            serviceName: "cursor-worker",
+            status: "running",
+            lifecycle: "ephemeral",
+            scopeType: "run",
+            scopeId: "run-2",
+            reuseKey: null,
+            command: null,
+            cwd: null,
+            port: null,
+            url: null,
+            provider: "agent_container",
+            providerRef: "cursor-ctr-1",
+            ownerAgentId: null,
+            startedByRunId: "run-2",
+            lastUsedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            stoppedAt: null,
+            stopPolicy: null,
+            healthStatus: "healthy",
+            reused: false,
+          },
+        ],
+      }),
+    ).toEqual({
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+  });
 });

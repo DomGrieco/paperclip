@@ -103,7 +103,7 @@ export interface WorkspaceRuntimeService {
   cwd: string | null;
   port: number | null;
   url: string | null;
-  provider: "local_process" | "adapter_managed" | "hermes_container";
+  provider: "local_process" | "adapter_managed" | "hermes_container" | "agent_container";
   providerRef: string | null;
   ownerAgentId: string | null;
   startedByRunId: string | null;

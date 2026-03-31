@@ -64,6 +64,19 @@ export function resolveObservedRunnerSnapshot(input: {
     };
   }
 
+  const agentContainers = services.filter((service) => service.provider === "agent_container");
+  if (agentContainers.length > 0) {
+    return {
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: input.planned.workspaceStrategyType,
+      executionMode: input.planned.executionMode,
+      browserCapable: agentContainers.some((service) => Boolean(service.url)),
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    };
+  }
+
   const adapterManaged = services.filter((service) => service.provider === "adapter_managed");
   if (adapterManaged.length === 0) return input.planned;
 
