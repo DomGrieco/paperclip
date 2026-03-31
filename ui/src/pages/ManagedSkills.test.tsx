@@ -99,6 +99,17 @@ describe("ManagedSkills page", () => {
         createdAt: "2026-03-31T00:00:00.000Z",
         updatedAt: "2026-03-31T00:05:00.000Z",
       },
+      {
+        id: "skill-2",
+        companyId: "company-1",
+        name: "Archived Research UI",
+        slug: "archived-research-ui",
+        description: "Archived variant",
+        bodyMarkdown: "# Archived Research UI",
+        status: "archived",
+        createdAt: "2026-03-31T00:00:00.000Z",
+        updatedAt: "2026-03-31T00:05:00.000Z",
+      },
     ];
 
     const html = renderToStaticMarkup(<ManagedSkills />);
@@ -108,5 +119,7 @@ describe("ManagedSkills page", () => {
     expect(html).toContain("Improve UI research prompts");
     expect(html).toContain("Scopes");
     expect(html).toContain("Edit");
+    expect(html).toContain("Archive");
+    expect(html).toContain("Restore");
   });
 });

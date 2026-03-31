@@ -16,6 +16,10 @@ export const managedSkillsApi = {
     api.get<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}`),
   update: (companyId: string, skillId: string, data: UpdateManagedSkill) =>
     api.patch<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}`, data),
+  archive: (companyId: string, skillId: string) =>
+    api.post<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}/archive`, {}),
+  restore: (companyId: string, skillId: string) =>
+    api.post<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}/restore`, {}),
   listScopes: (companyId: string, skillId: string) =>
     api.get<ManagedSkillScopeAssignment[]>(`/companies/${companyId}/managed-skills/${skillId}/scopes`),
   replaceScopes: (companyId: string, skillId: string, assignments: ManagedSkillScopeAssignmentInput[]) =>

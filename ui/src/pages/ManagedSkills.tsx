@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Eye, Pencil, Plus, SlidersHorizontal } from "lucide-react";
+import { Archive, BookOpen, Eye, Pencil, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import type { Agent, ManagedSkill, ManagedSkillScopeAssignment, Project } from "@paperclipai/shared";
 import { agentsApi } from "../api/agents";
 import { managedSkillsApi } from "../api/managed-skills";
@@ -37,11 +37,54 @@ type PreviewFilterState = {
   agentId: string;
 };
 
+function buildManagedSkillMarkdownTemplate(name: string, description: string) {
+  const normalizedName = name.trim() || "research-ui";
+  const normalizedDescription = description.trim() || "Describe when to use this skill";
+  return `---\nname: ${normalizedName}\ndescription: ${normalizedDescription}\n---\n\n# ${normalizedName}\n`;
+}
+
+function validateManagedSkillMarkdown(input: {
+  name: string;
+  description: string;
+  bodyMarkdown: string;
+}) {
+  const bodyMarkdown = input.bodyMarkdown.trim();
+  const frontmatterMatch = bodyMarkdown.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch?.[1]) {
+    return "Skill markdown must start with YAML frontmatter including name and description.";
+  }
+
+  const frontmatterLines = frontmatterMatch[1].split("\n");
+  let frontmatterName = "";
+  let frontmatterDescription = "";
+  for (const line of frontmatterLines) {
+    const [key, ...rest] = line.split(":");
+    if (!key || rest.length === 0) continue;
+    const value = rest.join(":").trim();
+    if (key.trim() === "name") frontmatterName = value;
+    if (key.trim() === "description") frontmatterDescription = value;
+  }
+
+  if (!frontmatterName) {
+    return "Skill markdown frontmatter must include a name field.";
+  }
+  if (frontmatterName.trim().toLowerCase() !== input.name.trim().toLowerCase()) {
+    return "Skill markdown frontmatter name must match the managed skill name.";
+  }
+  if (input.description.trim() && !frontmatterDescription) {
+    return "Skill markdown frontmatter must include description when the managed skill description is set.";
+  }
+  if (input.description.trim() && frontmatterDescription.trim() !== input.description.trim()) {
+    return "Skill markdown frontmatter description must match the managed skill description.";
+  }
+  return null;
+}
+
 const EMPTY_FORM: ManagedSkillFormState = {
   name: "",
   slug: "",
   description: "",
-  bodyMarkdown: "",
+  bodyMarkdown: buildManagedSkillMarkdownTemplate("", ""),
   status: "active",
 };
 
@@ -175,6 +218,12 @@ export function ManagedSkills() {
       };
       if (!payload.name) throw new Error("Name is required");
       if (!payload.bodyMarkdown.trim()) throw new Error("Body markdown is required");
+      const markdownError = validateManagedSkillMarkdown({
+        name: payload.name,
+        description: payload.description ?? "",
+        bodyMarkdown: payload.bodyMarkdown,
+      });
+      if (markdownError) throw new Error(markdownError);
       if (editingSkill) {
         return managedSkillsApi.update(selectedCompanyId, editingSkill.id, payload);
       }
@@ -217,6 +266,20 @@ export function ManagedSkills() {
     },
     onError: (mutationError) => {
       setScopeError(mutationError instanceof Error ? mutationError.message : "Failed to save scope assignments");
+    },
+  });
+
+  const toggleArchiveMutation = useMutation({
+    mutationFn: async (skill: ManagedSkill) => {
+      if (!selectedCompanyId) throw new Error("No company selected");
+      if (skill.status === "archived") {
+        return managedSkillsApi.restore(selectedCompanyId, skill.id);
+      }
+      return managedSkillsApi.archive(selectedCompanyId, skill.id);
+    },
+    onSuccess: async () => {
+      if (!selectedCompanyId) return;
+      await queryClient.invalidateQueries({ queryKey: queryKeys.managedSkills.list(selectedCompanyId) });
     },
   });
 
@@ -319,6 +382,16 @@ export function ManagedSkills() {
                       <Pencil className="h-3.5 w-3.5" />
                       Edit
                     </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => toggleArchiveMutation.mutate(skill)}
+                      disabled={toggleArchiveMutation.isPending}
+                    >
+                      {skill.status === "archived" ? <RotateCcw className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+                      {skill.status === "archived" ? "Restore" : "Archive"}
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -384,15 +457,28 @@ export function ManagedSkills() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="managed-skill-body">Skill markdown</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="managed-skill-body">Skill markdown</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => updateField("bodyMarkdown", buildManagedSkillMarkdownTemplate(formState.name, formState.description))}
+                >
+                  Reset template
+                </Button>
+              </div>
               <Textarea
                 id="managed-skill-body"
                 value={formState.bodyMarkdown}
                 onChange={(event) => updateField("bodyMarkdown", event.target.value)}
-                placeholder={"---\nname: research-ui\ndescription: Improve UI research prompts\n---\n\n# Research UI\n"}
+                placeholder={buildManagedSkillMarkdownTemplate("research-ui", "Improve UI research prompts")}
                 rows={16}
                 className="font-mono text-xs"
               />
+              <p className="text-xs text-muted-foreground">
+                Include YAML frontmatter with name and description that matches the fields above.
+              </p>
             </div>
 
             {formError ? <p className="text-sm text-destructive">{formError}</p> : null}

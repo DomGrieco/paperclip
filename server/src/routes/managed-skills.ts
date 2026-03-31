@@ -74,6 +74,24 @@ export function managedSkillRoutes(db: Db) {
     },
   );
 
+  router.post("/companies/:companyId/managed-skills/:id/archive", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    const skillId = req.params.id as string;
+    assertCompanyAccess(req, companyId);
+    assertBoard(req);
+    const item = await svc.archiveManagedSkill(companyId, skillId);
+    res.json(item);
+  });
+
+  router.post("/companies/:companyId/managed-skills/:id/restore", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    const skillId = req.params.id as string;
+    assertCompanyAccess(req, companyId);
+    assertBoard(req);
+    const item = await svc.restoreManagedSkill(companyId, skillId);
+    res.json(item);
+  });
+
   router.get("/companies/:companyId/managed-skills/:id/scopes", async (req, res) => {
     const companyId = req.params.companyId as string;
     const skillId = req.params.id as string;

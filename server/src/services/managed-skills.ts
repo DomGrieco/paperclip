@@ -71,6 +71,36 @@ function normalizeManagedSkillSlug(value: string): string {
   return normalized || "skill";
 }
 
+function validateManagedSkillBodyMarkdown(input: {
+  bodyMarkdown: string;
+  name: string;
+  description: string | null;
+}): string {
+  const bodyMarkdown = input.bodyMarkdown.trim();
+  const frontmatterMatch = bodyMarkdown.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatterMatch?.[1]) {
+    throw unprocessable("Skill markdown must start with YAML frontmatter including name and description");
+  }
+  const frontmatter = parseSkillFrontmatter(bodyMarkdown);
+  if (!frontmatter.name) {
+    throw unprocessable("Skill markdown frontmatter must include a name field");
+  }
+  if (normalizeSkillName(frontmatter.name) !== normalizeSkillName(input.name)) {
+    throw unprocessable("Skill markdown frontmatter name must match the managed skill name");
+  }
+  if (input.description && !frontmatter.description) {
+    throw unprocessable("Skill markdown frontmatter must include description when the managed skill description is set");
+  }
+  if (
+    input.description &&
+    frontmatter.description &&
+    frontmatter.description.trim() !== input.description.trim()
+  ) {
+    throw unprocessable("Skill markdown frontmatter description must match the managed skill description");
+  }
+  return bodyMarkdown;
+}
+
 function scopeRank(sourceType: EffectiveSkillSource): number {
   switch (sourceType) {
     case "agent":
@@ -268,15 +298,22 @@ export function managedSkillService(db: Db) {
     },
 
     async createManagedSkill(companyId: string, input: CreateManagedSkill): Promise<ManagedSkill> {
+      const name = input.name.trim();
+      const description = input.description?.trim() || null;
       const slug = normalizeManagedSkillSlug(input.slug ?? input.name);
+      const bodyMarkdown = validateManagedSkillBodyMarkdown({
+        bodyMarkdown: input.bodyMarkdown,
+        name,
+        description,
+      });
       const [row] = await db
         .insert(managedSkills)
         .values({
           companyId,
-          name: input.name.trim(),
+          name,
           slug,
-          description: input.description?.trim() || null,
-          bodyMarkdown: input.bodyMarkdown.trim(),
+          description,
+          bodyMarkdown,
           status: input.status ?? "active",
           updatedAt: new Date(),
         })
@@ -294,23 +331,38 @@ export function managedSkillService(db: Db) {
         throw notFound("Managed skill not found");
       }
 
+      const nextName = input.name?.trim() ?? existing.name;
+      const nextDescription = input.description === undefined ? existing.description : (input.description?.trim() || null);
       const nextSlug = input.slug
         ? normalizeManagedSkillSlug(input.slug)
         : existing.slug;
+      const nextBodyMarkdown = validateManagedSkillBodyMarkdown({
+        bodyMarkdown: input.bodyMarkdown ?? existing.bodyMarkdown,
+        name: nextName,
+        description: nextDescription,
+      });
 
       const [row] = await db
         .update(managedSkills)
         .set({
-          name: input.name?.trim() ?? existing.name,
+          name: nextName,
           slug: nextSlug,
-          description: input.description === undefined ? existing.description : (input.description?.trim() || null),
-          bodyMarkdown: input.bodyMarkdown?.trim() ?? existing.bodyMarkdown,
+          description: nextDescription,
+          bodyMarkdown: nextBodyMarkdown,
           status: input.status ?? (existing.status as ManagedSkillStatus),
           updatedAt: new Date(),
         })
         .where(and(eq(managedSkills.companyId, companyId), eq(managedSkills.id, skillId)))
         .returning();
       return mapManagedSkill(row);
+    },
+
+    async archiveManagedSkill(companyId: string, skillId: string): Promise<ManagedSkill> {
+      return this.updateManagedSkill(companyId, skillId, { status: "archived" });
+    },
+
+    async restoreManagedSkill(companyId: string, skillId: string): Promise<ManagedSkill> {
+      return this.updateManagedSkill(companyId, skillId, { status: "active" });
     },
 
     async listManagedSkillScopes(companyId: string, skillId: string): Promise<ManagedSkillScopeAssignment[]> {

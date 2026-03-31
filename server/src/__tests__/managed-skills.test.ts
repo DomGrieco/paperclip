@@ -93,6 +93,10 @@ async function createBuiltInSkill(root: string, name: string, description: strin
   );
 }
 
+function managedSkillMarkdown(name: string, description: string, heading = name) {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${heading}\n`;
+}
+
 afterEach(async () => {
   while (runningInstances.length > 0) {
     const instance = runningInstances.pop();
@@ -153,14 +157,14 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Research UI Company",
       slug: "research-ui",
       description: "Company override",
-      bodyMarkdown: "# Company\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Company", "Company override", "Company"),
       status: "active",
     });
     const second = await service.createManagedSkill(companyId, {
       name: "Research UI Project",
       slug: "research-ui",
       description: "Project override",
-      bodyMarkdown: "# Project\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Project", "Project override", "Project"),
       status: "active",
     });
 
@@ -200,7 +204,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Research UI Company",
       slug: "research-ui",
       description: "Company override",
-      bodyMarkdown: "# Company\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Company", "Company override", "Company"),
       status: "active",
     }).returning();
     const [projectSkill] = await db.insert(managedSkills).values({
@@ -208,7 +212,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Research UI Project",
       slug: "research-ui",
       description: "Project override",
-      bodyMarkdown: "# Project\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Project", "Project override", "Project"),
       status: "active",
     }).returning();
     const [agentSkill] = await db.insert(managedSkills).values({
@@ -272,6 +276,64 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
     );
   });
 
+  it("archives and restores managed skills through helper methods", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "PAP" }).returning();
+
+    const created = await service.createManagedSkill(company.id, {
+      name: "Research UI",
+      slug: "research-ui",
+      description: "Improve UI research prompts",
+      bodyMarkdown: managedSkillMarkdown("Research UI", "Improve UI research prompts"),
+      status: "active",
+    });
+
+    const archived = await service.archiveManagedSkill(company.id, created.id);
+    expect(archived.status).toBe("archived");
+
+    const restored = await service.restoreManagedSkill(company.id, created.id);
+    expect(restored.status).toBe("active");
+  });
+
+  it("rejects managed skill markdown without YAML frontmatter", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "PAP" }).returning();
+
+    await expect(service.createManagedSkill(company.id, {
+      name: "Research UI",
+      slug: "research-ui",
+      description: "Improve UI research prompts",
+      bodyMarkdown: "# Research UI\n",
+      status: "active",
+    })).rejects.toMatchObject(unprocessable("Skill markdown must start with YAML frontmatter including name and description"));
+  });
+
+  it("rejects renaming a managed skill when the markdown frontmatter is stale", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "PAP" }).returning();
+
+    const created = await service.createManagedSkill(company.id, {
+      name: "Research UI",
+      slug: "research-ui",
+      description: "Improve UI research prompts",
+      bodyMarkdown: managedSkillMarkdown("Research UI", "Improve UI research prompts"),
+      status: "active",
+    });
+
+    await expect(service.updateManagedSkill(company.id, created.id, {
+      name: "Research UI Updated",
+    })).rejects.toMatchObject(unprocessable("Skill markdown frontmatter name must match the managed skill name"));
+  });
+
   it("returns preview metadata for effective resolution candidates", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
@@ -289,7 +351,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Research UI Company",
       slug: "research-ui",
       description: "Company override",
-      bodyMarkdown: "# Company\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Company", "Company override", "Company"),
       status: "active",
     }).returning();
     const [projectSkill] = await db.insert(managedSkills).values({
@@ -297,7 +359,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Research UI Project",
       slug: "research-ui",
       description: "Project override",
-      bodyMarkdown: "# Project\n",
+      bodyMarkdown: managedSkillMarkdown("Research UI Project", "Project override", "Project"),
       status: "active",
     }).returning();
 
@@ -426,7 +488,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Scoped Skill",
       slug: "scoped-skill",
       description: "Company A skill",
-      bodyMarkdown: "# Skill\n",
+      bodyMarkdown: managedSkillMarkdown("Scoped Skill", "Company A skill", "Skill"),
       status: "active",
     });
 
@@ -458,7 +520,7 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
       name: "Scoped Skill",
       slug: "scoped-skill",
       description: "Company A skill",
-      bodyMarkdown: "# Skill\n",
+      bodyMarkdown: managedSkillMarkdown("Scoped Skill", "Company A skill", "Skill"),
       status: "active",
     });
 

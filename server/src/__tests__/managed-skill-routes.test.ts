@@ -10,6 +10,8 @@ const mockManagedSkillService = vi.hoisted(() => ({
   createManagedSkill: vi.fn(),
   getManagedSkill: vi.fn(),
   updateManagedSkill: vi.fn(),
+  archiveManagedSkill: vi.fn(),
+  restoreManagedSkill: vi.fn(),
   listManagedSkillScopes: vi.fn(),
   replaceManagedSkillScopes: vi.fn(),
   previewEffectiveSkills: vi.fn(),
@@ -195,6 +197,46 @@ describe("managed skill routes", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("Validation error");
     expect(mockManagedSkillService.updateManagedSkill).not.toHaveBeenCalled();
+  });
+
+  it("archives a managed skill", async () => {
+    mockManagedSkillService.archiveManagedSkill.mockResolvedValueOnce({
+      id: "skill-1",
+      companyId: "company-1",
+      name: "Skill One",
+      slug: "skill-one",
+      description: "Archived",
+      bodyMarkdown: "# Skill One",
+      status: "archived",
+      createdAt: new Date("2026-03-31T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-31T00:05:00.000Z"),
+    });
+
+    const res = await request(createApp(boardActor)).post("/api/companies/company-1/managed-skills/skill-1/archive");
+
+    expect(res.status).toBe(200);
+    expect(mockManagedSkillService.archiveManagedSkill).toHaveBeenCalledWith("company-1", "skill-1");
+    expect(res.body).toEqual(expect.objectContaining({ status: "archived" }));
+  });
+
+  it("restores a managed skill", async () => {
+    mockManagedSkillService.restoreManagedSkill.mockResolvedValueOnce({
+      id: "skill-1",
+      companyId: "company-1",
+      name: "Skill One",
+      slug: "skill-one",
+      description: "Restored",
+      bodyMarkdown: "# Skill One",
+      status: "active",
+      createdAt: new Date("2026-03-31T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-31T00:06:00.000Z"),
+    });
+
+    const res = await request(createApp(boardActor)).post("/api/companies/company-1/managed-skills/skill-1/restore");
+
+    expect(res.status).toBe(200);
+    expect(mockManagedSkillService.restoreManagedSkill).toHaveBeenCalledWith("company-1", "skill-1");
+    expect(res.body).toEqual(expect.objectContaining({ status: "active" }));
   });
 
   it("lists managed skill scopes", async () => {
