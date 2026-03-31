@@ -263,17 +263,42 @@ describe("managed skill routes", () => {
   });
 
   it("returns the effective preview for board users", async () => {
-    mockManagedSkillService.previewEffectiveSkills.mockResolvedValueOnce([
-      {
-        name: "skill-one",
-        description: "Preview",
-        bodyMarkdown: "# Preview",
-        sourceType: "project",
-        sourceLabel: "project",
-        managedSkillId: "skill-1",
-        scopeId: "11111111-1111-1111-1111-111111111111",
+    mockManagedSkillService.previewEffectiveSkills.mockResolvedValueOnce({
+      companyId: "company-1",
+      projectId: "11111111-1111-1111-1111-111111111111",
+      agentId: "22222222-2222-2222-2222-222222222222",
+      generatedAt: new Date("2026-03-31T00:00:00.000Z"),
+      counts: {
+        total: 1,
+        builtin: 0,
+        managed: 1,
       },
-    ]);
+      entries: [
+        {
+          name: "skill-one",
+          description: "Preview",
+          bodyMarkdown: "# Preview",
+          sourceType: "project",
+          sourceLabel: "project",
+          managedSkillId: "skill-1",
+          scopeId: "11111111-1111-1111-1111-111111111111",
+          managedSkillSlug: "skill-one",
+          managedSkillUpdatedAt: new Date("2026-03-31T00:00:00.000Z"),
+          resolutionRank: 3,
+          candidates: [
+            {
+              sourceType: "project",
+              sourceLabel: "project",
+              managedSkillId: "skill-1",
+              scopeId: "11111111-1111-1111-1111-111111111111",
+              managedSkillSlug: "skill-one",
+              managedSkillUpdatedAt: new Date("2026-03-31T00:00:00.000Z"),
+              resolutionRank: 3,
+            },
+          ],
+        },
+      ],
+    });
 
     const res = await request(createApp(boardActor)).get(
       "/api/companies/company-1/managed-skills/effective-preview?projectId=11111111-1111-1111-1111-111111111111&agentId=22222222-2222-2222-2222-222222222222",
@@ -290,10 +315,23 @@ describe("managed skill routes", () => {
       companyId: "company-1",
       projectId: "11111111-1111-1111-1111-111111111111",
       agentId: "22222222-2222-2222-2222-222222222222",
+      generatedAt: "2026-03-31T00:00:00.000Z",
+      counts: {
+        total: 1,
+        builtin: 0,
+        managed: 1,
+      },
       entries: [
         expect.objectContaining({
           name: "skill-one",
           sourceType: "project",
+          resolutionRank: 3,
+          candidates: [
+            expect.objectContaining({
+              sourceType: "project",
+              managedSkillSlug: "skill-one",
+            }),
+          ],
         }),
       ],
     });

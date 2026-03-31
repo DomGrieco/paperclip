@@ -43,18 +43,13 @@ export function managedSkillRoutes(db: Db) {
     assertCompanyAccess(req, companyId);
     assertBoard(req);
     const query = managedSkillEffectivePreviewQuerySchema.parse(req.query);
-    const entries = await svc.previewEffectiveSkills({
+    const preview = await svc.previewEffectiveSkills({
       companyId,
       projectId: query.projectId ?? null,
       agentId: query.agentId ?? null,
       moduleDir,
     });
-    res.json({
-      companyId,
-      projectId: query.projectId ?? null,
-      agentId: query.agentId ?? null,
-      entries,
-    });
+    res.json(preview);
   });
 
   router.get("/companies/:companyId/managed-skills/:id", async (req, res) => {

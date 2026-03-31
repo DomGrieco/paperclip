@@ -87,7 +87,9 @@ export type {
   ManagedSkillScopeType,
   ManagedSkillScopeAssignment,
   ManagedSkillRecord,
+  ManagedSkillEffectivePreviewCandidate,
   ManagedSkillEffectivePreviewEntry,
+  ManagedSkillEffectivePreviewResponse,
 } from "./managed-skill.js";
 export type {
   OrchestrationPolicySnapshot,

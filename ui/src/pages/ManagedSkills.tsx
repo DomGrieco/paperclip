@@ -553,25 +553,48 @@ export function ManagedSkills() {
             ) : !effectivePreviewQuery.data || effectivePreviewQuery.data.entries.length === 0 ? (
               <EmptyState icon={Eye} message="No effective skills resolved for the selected filters." />
             ) : (
-              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                {effectivePreviewQuery.data.entries.map((entry) => (
-                  <div key={`${entry.name}:${entry.sourceType}:${entry.scopeId ?? "none"}`} className="rounded-lg border border-border p-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-sm font-medium">{entry.name}</div>
-                      <span className="rounded-full border border-border px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                        {entry.sourceType}
-                      </span>
-                      {entry.managedSkillId ? (
-                        <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-                          {entry.managedSkillId}
-                        </code>
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span className="rounded-full border border-border px-2 py-1">total {effectivePreviewQuery.data.counts.total}</span>
+                  <span className="rounded-full border border-border px-2 py-1">builtin {effectivePreviewQuery.data.counts.builtin}</span>
+                  <span className="rounded-full border border-border px-2 py-1">managed {effectivePreviewQuery.data.counts.managed}</span>
+                </div>
+                <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                  {effectivePreviewQuery.data.entries.map((entry) => (
+                    <div key={`${entry.name}:${entry.sourceType}:${entry.scopeId ?? "none"}`} className="rounded-lg border border-border p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-sm font-medium">{entry.name}</div>
+                        <span className="rounded-full border border-border px-2 py-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                          {entry.sourceType}
+                        </span>
+                        {entry.managedSkillId ? (
+                          <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                            {entry.managedSkillId}
+                          </code>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground">
+                        {entry.description || "No description provided."}
+                      </div>
+                      {entry.candidates.length > 1 ? (
+                        <div className="mt-3 space-y-1">
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Resolution candidates</div>
+                          <div className="flex flex-wrap gap-2">
+                            {entry.candidates.map((candidate, index) => (
+                              <span
+                                key={`${entry.name}:${candidate.sourceType}:${candidate.scopeId ?? "none"}:${index}`}
+                                className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+                              >
+                                {candidate.sourceType}
+                                {candidate.managedSkillSlug ? `:${candidate.managedSkillSlug}` : ""}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       ) : null}
                     </div>
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {entry.description || "No description provided."}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </div>

@@ -272,6 +272,86 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
     );
   });
 
+  it("returns preview metadata for effective resolution candidates", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "PAP" }).returning();
+    const [project] = await db.insert(projects).values({
+      companyId: company.id,
+      name: "Project",
+      urlKey: `project-${Date.now()}`,
+    }).returning();
+    const [companySkill] = await db.insert(managedSkills).values({
+      companyId: company.id,
+      name: "Research UI Company",
+      slug: "research-ui",
+      description: "Company override",
+      bodyMarkdown: "# Company\n",
+      status: "active",
+    }).returning();
+    const [projectSkill] = await db.insert(managedSkills).values({
+      companyId: company.id,
+      name: "Research UI Project",
+      slug: "research-ui",
+      description: "Project override",
+      bodyMarkdown: "# Project\n",
+      status: "active",
+    }).returning();
+
+    await db.insert(managedSkillScopes).values([
+      {
+        skillId: companySkill.id,
+        companyId: company.id,
+        scopeType: "company",
+        scopeId: company.id,
+        enabled: true,
+      },
+      {
+        skillId: projectSkill.id,
+        companyId: company.id,
+        scopeType: "project",
+        scopeId: project.id,
+        projectId: project.id,
+        enabled: true,
+      },
+    ]);
+
+    const preview = await service.previewEffectiveSkills({
+      companyId: company.id,
+      projectId: project.id,
+      moduleDir: "/tmp/does-not-matter",
+      additionalBuiltInSkillDirs: [],
+    });
+
+    expect(preview.companyId).toBe(company.id);
+    expect(preview.projectId).toBe(project.id);
+    expect(preview.agentId).toBeNull();
+    expect(preview.counts.managed).toBe(1);
+    expect(preview.entries).toEqual([
+      expect.objectContaining({
+        name: "research-ui",
+        sourceType: "project",
+        managedSkillId: projectSkill.id,
+        resolutionRank: 3,
+        candidates: [
+          expect.objectContaining({
+            sourceType: "project",
+            managedSkillId: projectSkill.id,
+            resolutionRank: 3,
+          }),
+          expect.objectContaining({
+            sourceType: "company",
+            managedSkillId: companySkill.id,
+            resolutionRank: 2,
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("excludes archived skills and disabled scopes", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);

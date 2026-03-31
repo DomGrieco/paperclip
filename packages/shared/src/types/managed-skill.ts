@@ -32,6 +32,16 @@ export interface ManagedSkillRecord {
   scopes: ManagedSkillScopeAssignment[];
 }
 
+export interface ManagedSkillEffectivePreviewCandidate {
+  sourceType: ManagedSkillEffectiveSourceType;
+  sourceLabel: string;
+  managedSkillId: string | null;
+  scopeId: string | null;
+  managedSkillSlug: string | null;
+  managedSkillUpdatedAt: Date | null;
+  resolutionRank: number;
+}
+
 export interface ManagedSkillEffectivePreviewEntry {
   name: string;
   description: string | null;
@@ -40,4 +50,21 @@ export interface ManagedSkillEffectivePreviewEntry {
   sourceLabel: string;
   managedSkillId: string | null;
   scopeId: string | null;
+  managedSkillSlug: string | null;
+  managedSkillUpdatedAt: Date | null;
+  resolutionRank: number;
+  candidates: ManagedSkillEffectivePreviewCandidate[];
+}
+
+export interface ManagedSkillEffectivePreviewResponse {
+  companyId: string;
+  projectId: string | null;
+  agentId: string | null;
+  generatedAt: Date;
+  counts: {
+    total: number;
+    builtin: number;
+    managed: number;
+  };
+  entries: ManagedSkillEffectivePreviewEntry[];
 }

@@ -1,7 +1,7 @@
 import type {
   CreateManagedSkill,
   ManagedSkill,
-  ManagedSkillEffectivePreviewEntry,
+  ManagedSkillEffectivePreviewResponse,
   ManagedSkillScopeAssignment,
   ManagedSkillScopeAssignmentInput,
   UpdateManagedSkill,
@@ -25,11 +25,6 @@ export const managedSkillsApi = {
     if (filters?.projectId) params.set("projectId", filters.projectId);
     if (filters?.agentId) params.set("agentId", filters.agentId);
     const qs = params.toString();
-    return api.get<{
-      companyId: string;
-      projectId: string | null;
-      agentId: string | null;
-      entries: ManagedSkillEffectivePreviewEntry[];
-    }>(`/companies/${companyId}/managed-skills/effective-preview${qs ? `?${qs}` : ""}`);
+    return api.get<ManagedSkillEffectivePreviewResponse>(`/companies/${companyId}/managed-skills/effective-preview${qs ? `?${qs}` : ""}`);
   },
 };

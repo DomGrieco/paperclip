@@ -7,7 +7,9 @@ import { listPaperclipSkillEntries } from "@paperclipai/adapter-utils/server-uti
 import type {
   CreateManagedSkill,
   ManagedSkill,
+  ManagedSkillEffectivePreviewCandidate,
   ManagedSkillEffectivePreviewEntry,
+  ManagedSkillEffectivePreviewResponse,
   ManagedSkillRecord,
   ManagedSkillScopeAssignment,
   ManagedSkillScopeAssignmentInput,
@@ -27,6 +29,10 @@ export type EffectiveManagedSkill = {
   sourceLabel: string;
   managedSkillId: string | null;
   scopeId: string | null;
+  managedSkillSlug: string | null;
+  managedSkillUpdatedAt: Date | null;
+  resolutionRank: number;
+  candidates?: ManagedSkillEffectivePreviewCandidate[];
 };
 
 export type MaterializedSkillDirectory = {
@@ -168,6 +174,9 @@ async function loadBuiltInSkills(moduleDir: string, additionalSkillDirs: string[
         sourceLabel: "builtin",
         managedSkillId: null,
         scopeId: null,
+        managedSkillSlug: normalizeManagedSkillSlug(entry.name),
+        managedSkillUpdatedAt: null,
+        resolutionRank: scopeRank("builtin"),
       };
     }),
   );
@@ -378,17 +387,32 @@ export function managedSkillService(db: Db) {
       agentId?: string | null;
       moduleDir: string;
       additionalBuiltInSkillDirs?: string[];
-    }): Promise<ManagedSkillEffectivePreviewEntry[]> {
+    }): Promise<ManagedSkillEffectivePreviewResponse> {
       const resolved = await this.resolveEffectiveSkills(input);
-      return resolved.map((entry) => ({
-        name: entry.name,
-        description: entry.description,
-        bodyMarkdown: entry.bodyMarkdown,
-        sourceType: entry.sourceType,
-        sourceLabel: entry.sourceLabel,
-        managedSkillId: entry.managedSkillId,
-        scopeId: entry.scopeId,
-      }));
+      return {
+        companyId: input.companyId,
+        projectId: input.projectId ?? null,
+        agentId: input.agentId ?? null,
+        generatedAt: new Date(),
+        counts: {
+          total: resolved.length,
+          builtin: resolved.filter((entry) => entry.sourceType === "builtin").length,
+          managed: resolved.filter((entry) => entry.sourceType !== "builtin").length,
+        },
+        entries: resolved.map((entry) => ({
+          name: entry.name,
+          description: entry.description,
+          bodyMarkdown: entry.bodyMarkdown,
+          sourceType: entry.sourceType,
+          sourceLabel: entry.sourceLabel,
+          managedSkillId: entry.managedSkillId,
+          scopeId: entry.scopeId,
+          managedSkillSlug: entry.managedSkillSlug,
+          managedSkillUpdatedAt: entry.managedSkillUpdatedAt,
+          resolutionRank: entry.resolutionRank,
+          candidates: entry.candidates ?? [],
+        })),
+      };
     },
 
     async resolveEffectiveSkills(input: {
@@ -435,17 +459,30 @@ export function managedSkillService(db: Db) {
         .where(scopeConditions.length === 1 ? scopeConditions[0]! : or(...scopeConditions));
 
       const skillIds = Array.from(new Set(allScopeRows.map((row) => row.skillId)));
-      const managedRows = skillIds.length > 0
+      const managedRows: Array<typeof managedSkills.$inferSelect> = skillIds.length > 0
         ? await db
             .select()
             .from(managedSkills)
             .where(and(inArray(managedSkills.id, skillIds), eq(managedSkills.status, "active")))
         : [];
-      const managedById = new Map(managedRows.map((row) => [row.id, row]));
+      const managedById = new Map<string, typeof managedSkills.$inferSelect>(managedRows.map((row) => [row.id, row]));
 
       const resolved = new Map<string, EffectiveManagedSkill>();
+      const candidatesByName = new Map<string, ManagedSkillEffectivePreviewCandidate[]>();
       for (const builtin of builtIns) {
-        resolved.set(normalizeSkillName(builtin.name), builtin);
+        const normalizedName = normalizeSkillName(builtin.name);
+        resolved.set(normalizedName, builtin);
+        candidatesByName.set(normalizedName, [
+          {
+            sourceType: builtin.sourceType,
+            sourceLabel: builtin.sourceLabel,
+            managedSkillId: builtin.managedSkillId,
+            scopeId: builtin.scopeId,
+            managedSkillSlug: builtin.managedSkillSlug,
+            managedSkillUpdatedAt: builtin.managedSkillUpdatedAt,
+            resolutionRank: builtin.resolutionRank,
+          },
+        ]);
       }
 
       for (const scopeType of ["company", "project", "agent"] as const) {
@@ -454,23 +491,42 @@ export function managedSkillService(db: Db) {
           const managed = managedById.get(scopeRow.skillId);
           if (!managed) continue;
           const name = normalizeSkillName(managed.slug || managed.name);
+          const resolutionRank = scopeRank(scopeType);
+          const previewCandidate: ManagedSkillEffectivePreviewCandidate = {
+            sourceType: scopeType,
+            sourceLabel: scopeType,
+            managedSkillId: managed.id,
+            scopeId: scopeType === "company" ? managed.companyId : (scopeRow.scopeId ?? scopeRow.projectId ?? scopeRow.agentId ?? null),
+            managedSkillSlug: managed.slug,
+            managedSkillUpdatedAt: managed.updatedAt,
+            resolutionRank,
+          };
           const candidate: EffectiveManagedSkill = {
             name,
             description: managed.description,
             bodyMarkdown: managed.bodyMarkdown,
             sourceType: scopeType,
             sourceLabel: scopeType,
-            managedSkillId: managed.id,
-            scopeId: scopeType === "company" ? managed.companyId : (scopeRow.scopeId ?? scopeRow.projectId ?? scopeRow.agentId ?? null),
+            managedSkillId: previewCandidate.managedSkillId,
+            scopeId: previewCandidate.scopeId,
+            managedSkillSlug: previewCandidate.managedSkillSlug,
+            managedSkillUpdatedAt: previewCandidate.managedSkillUpdatedAt,
+            resolutionRank,
           };
+          candidatesByName.set(name, [...(candidatesByName.get(name) ?? []), previewCandidate]);
           const existing = resolved.get(name);
-          if (!existing || scopeRank(candidate.sourceType) >= scopeRank(existing.sourceType)) {
+          if (!existing || resolutionRank >= existing.resolutionRank) {
             resolved.set(name, candidate);
           }
         }
       }
 
-      return Array.from(resolved.values()).sort((a, b) => a.name.localeCompare(b.name));
+      return Array.from(resolved.values())
+        .map((entry) => ({
+          ...entry,
+          candidates: (candidatesByName.get(entry.name) ?? []).sort((a, b) => b.resolutionRank - a.resolutionRank),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
     },
   };
 }
