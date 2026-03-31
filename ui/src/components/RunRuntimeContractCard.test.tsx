@@ -145,6 +145,18 @@ const run: HeartbeatRun = {
           },
         ],
       },
+      managedSkills: {
+        skillsDir: "/workspace/.paperclip/runtime/skills",
+        entries: [
+          {
+            name: "managed-skill",
+            sourceType: "company",
+            sourceLabel: "company",
+            managedSkillId: "skill-1",
+            scopeId: "company-1",
+          },
+        ],
+      },
       provenance: {
         source: "runtime_bundle",
         workspaceCwd: "/workspace",

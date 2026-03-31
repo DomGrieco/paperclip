@@ -82,6 +82,14 @@ export type {
   InstanceSchedulerHeartbeatAgent,
 } from "./heartbeat.js";
 export type {
+  ManagedSkill,
+  ManagedSkillStatus,
+  ManagedSkillScopeType,
+  ManagedSkillScopeAssignment,
+  ManagedSkillRecord,
+  ManagedSkillEffectivePreviewEntry,
+} from "./managed-skill.js";
+export type {
   OrchestrationPolicySnapshot,
   SwarmSubtaskKind,
   SwarmArtifactKind,
@@ -110,6 +118,7 @@ export type {
   SharedContextPublication,
   PaperclipSharedContextScope,
   PaperclipSharedContextProvenance,
+  PaperclipSharedContextManagedSkill,
   PaperclipSharedContextPacket,
   RuntimeBundleRunner,
   HermesBootstrapImportSummary,

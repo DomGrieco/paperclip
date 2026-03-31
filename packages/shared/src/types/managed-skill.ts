@@ -1,0 +1,43 @@
+export type ManagedSkillStatus = "active" | "archived";
+export type ManagedSkillScopeType = "company" | "project" | "agent";
+export type ManagedSkillEffectiveSourceType = "builtin" | ManagedSkillScopeType;
+
+export interface ManagedSkill {
+  id: string;
+  companyId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  bodyMarkdown: string;
+  status: ManagedSkillStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ManagedSkillScopeAssignment {
+  id: string;
+  skillId: string;
+  companyId: string;
+  scopeType: ManagedSkillScopeType;
+  scopeId: string | null;
+  projectId: string | null;
+  agentId: string | null;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ManagedSkillRecord {
+  skill: ManagedSkill;
+  scopes: ManagedSkillScopeAssignment[];
+}
+
+export interface ManagedSkillEffectivePreviewEntry {
+  name: string;
+  description: string | null;
+  bodyMarkdown: string;
+  sourceType: ManagedSkillEffectiveSourceType;
+  sourceLabel: string;
+  managedSkillId: string | null;
+  scopeId: string | null;
+}

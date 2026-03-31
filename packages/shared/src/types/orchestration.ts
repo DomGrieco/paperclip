@@ -156,6 +156,14 @@ export interface PaperclipSharedContextProvenance {
   sharedContextPath: string | null;
 }
 
+export interface PaperclipSharedContextManagedSkill {
+  name: string;
+  sourceType: "builtin" | "company" | "project" | "agent";
+  sourceLabel: string;
+  managedSkillId: string | null;
+  scopeId: string | null;
+}
+
 export interface PaperclipSharedContextPacket {
   version: "v1";
   scope: PaperclipSharedContextScope;
@@ -163,6 +171,10 @@ export interface PaperclipSharedContextPacket {
   runner: RuntimeBundleRunner;
   verification: RuntimeBundleVerification;
   memory: RuntimeBundleMemoryPacket;
+  managedSkills: {
+    skillsDir: string | null;
+    entries: PaperclipSharedContextManagedSkill[];
+  } | null;
   provenance: PaperclipSharedContextProvenance;
 }
 

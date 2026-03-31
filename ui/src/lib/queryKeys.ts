@@ -108,6 +108,13 @@ export const queryKeys = {
   skills: {
     available: ["skills", "available"] as const,
   },
+  managedSkills: {
+    list: (companyId: string) => ["managed-skills", companyId] as const,
+    detail: (companyId: string, skillId: string) => ["managed-skills", companyId, skillId] as const,
+    scopes: (companyId: string, skillId: string) => ["managed-skills", companyId, skillId, "scopes"] as const,
+    effectivePreview: (companyId: string, projectId?: string | null, agentId?: string | null) =>
+      ["managed-skills", companyId, "effective-preview", projectId ?? null, agentId ?? null] as const,
+  },
   plugins: {
     all: ["plugins"] as const,
     examples: ["plugins", "examples"] as const,

@@ -121,6 +121,14 @@ export function attachPaperclipSharedContextPacketToContext(
     runtimeBundleRoot: string | null;
     runtimeInstructionsPath: string | null;
     sharedContextPath: string | null;
+    managedSkillsDir?: string | null;
+    managedSkills?: Array<{
+      name: string;
+      sourceType: "builtin" | "company" | "project" | "agent";
+      sourceLabel: string;
+      managedSkillId: string | null;
+      scopeId: string | null;
+    }> | null;
   },
 ) {
   if (!input.runtimeBundle || !input.workspaceCwd) {
@@ -134,6 +142,8 @@ export function attachPaperclipSharedContextPacketToContext(
     runtimeBundleRoot: input.runtimeBundleRoot,
     runtimeInstructionsPath: input.runtimeInstructionsPath,
     sharedContextPath: input.sharedContextPath,
+    managedSkillsDir: input.managedSkillsDir,
+    managedSkills: input.managedSkills,
   });
   return contextSnapshot;
 }
@@ -2141,6 +2151,14 @@ export function heartbeatService(db: Db) {
             companyId: agent.companyId,
             managedHome: readNonEmptyString(parseObject(context.paperclipWorkspace).hermesHome) ?? null,
             runtimeBundle,
+            managedSkillsDir: materializedSkills.skillsDir,
+            managedSkills: context.paperclipEffectiveSkills as Array<{
+              name: string;
+              sourceType: "builtin" | "company" | "project" | "agent";
+              sourceLabel: string;
+              managedSkillId: string | null;
+              scopeId: string | null;
+            }>,
             authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
             persistedBootstrap: await hermesBootstrapProfileService(db).getStoredProfile(agent.companyId),
           })
@@ -2169,6 +2187,14 @@ export function heartbeatService(db: Db) {
       runtimeBundleRoot: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_ROOT) ?? null,
       runtimeInstructionsPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH) ?? null,
       sharedContextPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_SHARED_CONTEXT_PATH) ?? null,
+      managedSkillsDir: materializedSkills.skillsDir,
+      managedSkills: context.paperclipEffectiveSkills as Array<{
+        name: string;
+        sourceType: "builtin" | "company" | "project" | "agent";
+        sourceLabel: string;
+        managedSkillId: string | null;
+        scopeId: string | null;
+      }>,
     });
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
