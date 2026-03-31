@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import type { Db } from "@paperclipai/db";
 import {
@@ -9,6 +11,8 @@ import {
 import { validate } from "../middleware/validate.js";
 import { assertBoard, assertCompanyAccess } from "./authz.js";
 import { managedSkillService } from "../services/managed-skills.js";
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
 export function managedSkillRoutes(db: Db) {
   const router = Router();
@@ -43,7 +47,7 @@ export function managedSkillRoutes(db: Db) {
       companyId,
       projectId: query.projectId ?? null,
       agentId: query.agentId ?? null,
-      moduleDir: __dirname,
+      moduleDir,
     });
     res.json({
       companyId,
