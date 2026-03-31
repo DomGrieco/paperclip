@@ -104,6 +104,36 @@ describe("managed skill routes", () => {
     expect(res.body).toEqual(expect.objectContaining({ id: "skill-2", slug: "skill-two" }));
   });
 
+  it("allows duplicate slugs so scoped overrides can coexist", async () => {
+    mockManagedSkillService.createManagedSkill.mockResolvedValueOnce({
+      id: "skill-3",
+      companyId: "company-1",
+      name: "Skill Two Project Override",
+      slug: "skill-two",
+      description: "Project-specific override",
+      bodyMarkdown: "# Project",
+      status: "active",
+      createdAt: new Date("2026-03-31T00:01:00.000Z"),
+      updatedAt: new Date("2026-03-31T00:01:00.000Z"),
+    });
+
+    const payload = {
+      name: "Skill Two Project Override",
+      slug: "skill-two",
+      description: "Project-specific override",
+      bodyMarkdown: "# Project",
+      status: "active",
+    };
+
+    const res = await request(createApp(boardActor))
+      .post("/api/companies/company-1/managed-skills")
+      .send(payload);
+
+    expect(res.status).toBe(201);
+    expect(mockManagedSkillService.createManagedSkill).toHaveBeenCalledWith("company-1", payload);
+    expect(res.body).toEqual(expect.objectContaining({ id: "skill-3", slug: "skill-two" }));
+  });
+
   it("returns 400 for invalid create payloads", async () => {
     const res = await request(createApp(boardActor))
       .post("/api/companies/company-1/managed-skills")

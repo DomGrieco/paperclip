@@ -219,14 +219,6 @@ export function managedSkillService(db: Db) {
 
     async createManagedSkill(companyId: string, input: CreateManagedSkill): Promise<ManagedSkill> {
       const slug = normalizeManagedSkillSlug(input.slug ?? input.name);
-      const existing = await db
-        .select({ id: managedSkills.id })
-        .from(managedSkills)
-        .where(and(eq(managedSkills.companyId, companyId), eq(managedSkills.slug, slug)))
-        .then((rows) => rows[0] ?? null);
-      if (existing) {
-        throw conflict(`Managed skill slug already exists: ${slug}`);
-      }
       const [row] = await db
         .insert(managedSkills)
         .values({
@@ -255,16 +247,6 @@ export function managedSkillService(db: Db) {
       const nextSlug = input.slug
         ? normalizeManagedSkillSlug(input.slug)
         : existing.slug;
-      if (nextSlug !== existing.slug) {
-        const conflictRow = await db
-          .select({ id: managedSkills.id })
-          .from(managedSkills)
-          .where(and(eq(managedSkills.companyId, companyId), eq(managedSkills.slug, nextSlug)))
-          .then((rows) => rows[0] ?? null);
-        if (conflictRow) {
-          throw conflict(`Managed skill slug already exists: ${nextSlug}`);
-        }
-      }
 
       const [row] = await db
         .update(managedSkills)

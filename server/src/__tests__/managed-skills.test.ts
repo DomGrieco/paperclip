@@ -135,6 +135,42 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
     ]);
   });
 
+  it("allows duplicate managed-skill slugs so scoped overrides can coexist", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+    const companyId = crypto.randomUUID();
+
+    await db.insert(companies).values({
+      id: companyId,
+      name: "Paperclip",
+      slug: `paperclip-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    });
+
+    const first = await service.createManagedSkill(companyId, {
+      name: "Research UI Company",
+      slug: "research-ui",
+      description: "Company override",
+      bodyMarkdown: "# Company\n",
+      status: "active",
+    });
+    const second = await service.createManagedSkill(companyId, {
+      name: "Research UI Project",
+      slug: "research-ui",
+      description: "Project override",
+      bodyMarkdown: "# Project\n",
+      status: "active",
+    });
+
+    expect(first.slug).toBe("research-ui");
+    expect(second.slug).toBe("research-ui");
+    expect(second.id).not.toBe(first.id);
+
+    const listed = await service.listManagedSkills(companyId);
+    expect(listed.filter((skill) => skill.slug === "research-ui")).toHaveLength(2);
+  });
+
   it("applies company, project, and agent precedence over built-ins", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
