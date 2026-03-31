@@ -1,18 +1,22 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import {
+  ensureManagedAgentRuntime,
+  type AgentManagedRuntimeInfo,
+  type AgentManagedRuntimeInstallResult,
+  type AgentManagedRuntimeProfile,
+  type AgentManagedRuntimeSettings,
+  type AgentManagedRuntimeResolution,
+  type RunCommand,
+} from "./agent-managed-runtime.js";
 import {
   resolveHermesRuntimeChannelRoot,
   resolveHermesRuntimeChannelMetadataPath,
 } from "../home-paths.js";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_CHANNEL = "stable";
 const DEFAULT_SOURCE = "git+https://github.com/NousResearch/hermes-agent.git";
 const DEFAULT_REFRESH_INTERVAL_MINUTES = 360;
-const LOCK_RETRY_DELAY_MS = 250;
-const LOCK_TIMEOUT_MS = 30_000;
 
 export interface HermesManagedRuntimeInfo {
   schemaVersion: "v1";
@@ -31,25 +35,7 @@ export interface HermesManagedRuntimeResolution extends HermesManagedRuntimeInfo
   refreshed: boolean;
 }
 
-type HermesManagedRuntimeSettings = {
-  enabled: boolean;
-  channel: string;
-  source: string;
-  refreshIntervalMinutes: number;
-};
-
-type RunCommandInput = {
-  command: string;
-  args: string[];
-  cwd?: string;
-};
-
-type RunCommandResult = {
-  stdout: string;
-  stderr: string;
-};
-
-type RunCommand = (input: RunCommandInput) => Promise<RunCommandResult>;
+type HermesManagedRuntimeSettings = AgentManagedRuntimeSettings;
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -115,100 +101,35 @@ function resolveSettings(config: Record<string, unknown>): HermesManagedRuntimeS
   };
 }
 
-function nowIso(now: Date): string {
-  return now.toISOString();
-}
-
-function isStale(info: HermesManagedRuntimeInfo, now: Date): boolean {
-  const anchor = Date.parse(info.checkedAt || info.updatedAt);
-  if (!Number.isFinite(anchor)) return true;
-  const maxAgeMs = info.refreshIntervalMinutes * 60_000;
-  return anchor + maxAgeMs <= now.getTime();
-}
-
-async function pathExists(candidate: string): Promise<boolean> {
-  try {
-    await fs.access(candidate);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readMetadata(metadataPath: string): Promise<HermesManagedRuntimeInfo | null> {
-  try {
-    const raw = await fs.readFile(metadataPath, "utf8");
-    const parsed = JSON.parse(raw) as Partial<HermesManagedRuntimeInfo>;
-    if (
-      parsed.schemaVersion !== "v1" ||
-      !parsed.installRoot ||
-      !parsed.hermesCommand ||
-      !parsed.pythonCommand ||
-      !parsed.version ||
-      !parsed.channel ||
-      !parsed.source ||
-      !parsed.updatedAt ||
-      !parsed.checkedAt ||
-      typeof parsed.refreshIntervalMinutes !== "number"
-    ) {
-      return null;
-    }
-    return parsed as HermesManagedRuntimeInfo;
-  } catch {
-    return null;
-  }
-}
-
-async function writeMetadata(metadataPath: string, info: HermesManagedRuntimeInfo): Promise<void> {
-  await fs.mkdir(path.dirname(metadataPath), { recursive: true });
-  const tempPath = `${metadataPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await fs.writeFile(tempPath, `${JSON.stringify(info, null, 2)}\n`, "utf8");
-  await fs.rename(tempPath, metadataPath);
-}
-
-async function defaultRunCommand(input: RunCommandInput): Promise<RunCommandResult> {
-  const result = await execFileAsync(input.command, input.args, {
-    cwd: input.cwd,
-    maxBuffer: 1024 * 1024 * 16,
-    timeout: 1000 * 60 * 10,
-  });
-  return {
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
-}
-
 function parseVersion(stdout: string, stderr: string): string {
   const merged = `${stdout}\n${stderr}`.trim();
   return merged.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "unknown";
 }
 
-async function commandIsFunctional(command: string, runCommand: RunCommand): Promise<boolean> {
-  try {
-    await runCommand({ command, args: ["--version"] });
-    return true;
-  } catch {
-    return false;
+function readLegacyHermesMetadata(value: unknown): AgentManagedRuntimeInfo | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed = value as Record<string, unknown>;
+  if (
+    parsed.schemaVersion !== "v1" ||
+    typeof parsed.channel !== "string" ||
+    typeof parsed.source !== "string" ||
+    typeof parsed.installRoot !== "string" ||
+    typeof parsed.hermesCommand !== "string" ||
+    typeof parsed.pythonCommand !== "string" ||
+    typeof parsed.version !== "string" ||
+    typeof parsed.checkedAt !== "string" ||
+    typeof parsed.updatedAt !== "string" ||
+    typeof parsed.refreshIntervalMinutes !== "number"
+  ) {
+    return null;
   }
-}
 
-async function acquireLock(lockPath: string): Promise<() => Promise<void>> {
-  const startedAt = Date.now();
-  while (true) {
-    try {
-      await fs.mkdir(lockPath, { recursive: false });
-      return async () => {
-        await fs.rm(lockPath, { recursive: true, force: true });
-      };
-    } catch (error) {
-      const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
-      if (code !== "EEXIST") throw error;
-      if (Date.now() - startedAt >= LOCK_TIMEOUT_MS) {
-        throw new Error(`Timed out waiting for Hermes managed runtime lock at ${lockPath}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_DELAY_MS));
-    }
-  }
+  return {
+    ...parsed,
+    adapterType: "hermes",
+    provider: "managed_runtime_cache",
+    commandPath: parsed.hermesCommand,
+  } as AgentManagedRuntimeInfo;
 }
 
 async function installManagedRuntime(input: {
@@ -216,7 +137,7 @@ async function installManagedRuntime(input: {
   settings: HermesManagedRuntimeSettings;
   now: Date;
   runCommand: RunCommand;
-}): Promise<HermesManagedRuntimeInfo> {
+}): Promise<AgentManagedRuntimeInstallResult> {
   const installsRoot = path.join(input.channelRoot, "installs");
   await fs.mkdir(installsRoot, { recursive: true });
 
@@ -234,16 +155,42 @@ async function installManagedRuntime(input: {
   const version = parseVersion(versionResult.stdout, versionResult.stderr);
 
   return {
-    schemaVersion: "v1",
-    channel: input.settings.channel,
-    source: input.settings.source,
     installRoot: finalRoot,
+    commandPath: hermesCommand,
+    version,
+    extraFields: {
+      pythonCommand,
+      hermesCommand,
+    },
+  };
+}
+
+const hermesManagedRuntimeProfile: AgentManagedRuntimeProfile = {
+  adapterType: "hermes",
+  provider: "managed_runtime_cache",
+  resolveSettings,
+  resolveChannelRoot: (channel) => resolveHermesRuntimeChannelRoot(channel),
+  resolveMetadataPath: (channel, channelRoot) =>
+    channelRoot ? path.join(channelRoot, "metadata.json") : resolveHermesRuntimeChannelMetadataPath(channel),
+  installRuntime: installManagedRuntime,
+  deserializeMetadata: readLegacyHermesMetadata,
+};
+
+function toHermesManagedRuntimeResolution(info: AgentManagedRuntimeResolution): HermesManagedRuntimeResolution {
+  const hermesCommand = readString(info.hermesCommand) ?? info.commandPath;
+  const pythonCommand = readString(info.pythonCommand) ?? path.join(info.installRoot, "venv", "bin", "python");
+  return {
+    schemaVersion: "v1",
+    channel: info.channel,
+    source: info.source,
+    installRoot: info.installRoot,
     hermesCommand,
     pythonCommand,
-    version,
-    checkedAt: nowIso(input.now),
-    updatedAt: nowIso(input.now),
-    refreshIntervalMinutes: input.settings.refreshIntervalMinutes,
+    version: info.version,
+    checkedAt: info.checkedAt,
+    updatedAt: info.updatedAt,
+    refreshIntervalMinutes: info.refreshIntervalMinutes,
+    refreshed: info.refreshed,
   };
 }
 
@@ -253,46 +200,12 @@ export async function ensureManagedHermesRuntime(input: {
   runCommand?: RunCommand;
   channelRoot?: string;
 } = {}): Promise<HermesManagedRuntimeResolution> {
-  const config = input.config ?? {};
-  const settings = resolveSettings(config);
-  const now = input.now ?? new Date();
-  const channelRoot = input.channelRoot ?? resolveHermesRuntimeChannelRoot(settings.channel);
-  const metadataPath = input.channelRoot
-    ? path.join(channelRoot, "metadata.json")
-    : resolveHermesRuntimeChannelMetadataPath(settings.channel);
-  const lockPath = path.join(channelRoot, ".lock");
-  const runCommand = input.runCommand ?? defaultRunCommand;
-
-  await fs.mkdir(channelRoot, { recursive: true });
-  const releaseLock = await acquireLock(lockPath);
-  try {
-    const existing = await readMetadata(metadataPath);
-    if (
-      existing &&
-      existing.channel === settings.channel &&
-      existing.source === settings.source &&
-      (await pathExists(existing.hermesCommand)) &&
-      (await commandIsFunctional(existing.hermesCommand, runCommand)) &&
-      (!settings.enabled || !isStale(existing, now))
-    ) {
-      const nextInfo: HermesManagedRuntimeInfo = {
-        ...existing,
-        checkedAt: nowIso(now),
-        refreshIntervalMinutes: settings.refreshIntervalMinutes,
-      };
-      await writeMetadata(metadataPath, nextInfo);
-      return { ...nextInfo, refreshed: false };
-    }
-
-    const installed = await installManagedRuntime({
-      channelRoot,
-      settings,
-      now,
-      runCommand,
-    });
-    await writeMetadata(metadataPath, installed);
-    return { ...installed, refreshed: true };
-  } finally {
-    await releaseLock();
-  }
+  const result = await ensureManagedAgentRuntime({
+    profile: hermesManagedRuntimeProfile,
+    config: input.config,
+    now: input.now,
+    runCommand: input.runCommand,
+    channelRoot: input.channelRoot,
+  });
+  return toHermesManagedRuntimeResolution(result);
 }
