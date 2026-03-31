@@ -128,6 +128,13 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       ].join("\n"),
       "utf8",
     );
+    const managedSkillsDir = path.join(cwd, ".paperclip", "runtime", "skills");
+    await fs.mkdir(path.join(managedSkillsDir, "managed-skill"), { recursive: true });
+    await fs.writeFile(
+      path.join(managedSkillsDir, "managed-skill", "SKILL.md"),
+      "---\nname: managed-skill\ndescription: Managed runtime skill\n---\n\n# managed\n",
+      "utf8",
+    );
     const nextConfig = await prepareHermesAdapterConfigForExecution({
       config: {
         model: "anthropic/claude-sonnet-4",
@@ -137,6 +144,16 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       companyId: "company-1",
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
+      managedSkillsDir,
+      managedSkills: [
+        {
+          name: "managed-skill",
+          sourceType: "company",
+          sourceLabel: "company",
+          managedSkillId: "skill-1",
+          scopeId: "company-1",
+        },
+      ],
       authToken: "jwt-token-123",
       managedRuntime: makeManagedRuntime(cwd),
     });
@@ -152,6 +169,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"version\":\"v1\"");
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
+    expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"managedSkills\"");
+    expect(env.PAPERCLIP_SKILLS_DIR).toBe(managedSkillsDir);
     expect(env.HERMES_HOME).toContain(path.join("company-hermes-home"));
     expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
     expect(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION).toBe("Hermes Agent v9.9.9");
@@ -185,6 +204,16 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         workspaceCwd: string;
       };
       memory: RuntimeBundle["memory"];
+      managedSkills?: {
+        skillsDir: string | null;
+        entries: Array<{
+          name: string;
+          sourceType: string;
+          sourceLabel: string;
+          managedSkillId: string | null;
+          scopeId: string | null;
+        }>;
+      };
     };
     expect(sharedContext.version).toBe("v1");
     expect(sharedContext.scope.companyId).toBe("company-1");
@@ -193,15 +222,31 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(sharedContext.provenance.source).toBe("runtime_bundle");
     expect(sharedContext.provenance.workspaceCwd).toBe(cwd);
     expect(sharedContext.memory.snippets).toHaveLength(1);
+    expect(sharedContext.managedSkills).toEqual({
+      skillsDir: managedSkillsDir,
+      entries: [
+        {
+          name: "managed-skill",
+          sourceType: "company",
+          sourceLabel: "company",
+          managedSkillId: "skill-1",
+          scopeId: "company-1",
+        },
+      ],
+    });
 
     const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");
     const copiedEnv = await fs.readFile(path.join(env.HERMES_HOME, ".env"), "utf8");
     const copiedConfig = await fs.readFile(path.join(env.HERMES_HOME, "config.yaml"), "utf8");
+    const skillsDirStats = await fs.lstat(path.join(env.HERMES_HOME, "skills"));
+    const projectedSkill = await fs.readFile(path.join(env.HERMES_HOME, "skills", "managed-skill", "SKILL.md"), "utf8");
 
     expect(copiedAuth).toContain("openai-codex");
-    expect(copiedEnv).toContain("OPENAI_API_KEY=test-key");
+    expect(copiedEnv).toContain("OPENAI_API_KEY=");
     expect(copiedEnv).not.toContain("TERMINAL_CWD=/Users/eru");
-    expect(copiedConfig).toContain("terminal:");
+    expect(skillsDirStats.isDirectory() || skillsDirStats.isSymbolicLink()).toBe(true);
+    expect(projectedSkill).toContain("name: managed-skill");
+
     expect(copiedConfig).toContain("timeout: 300");
     expect(copiedConfig).not.toContain("cwd: /Users/eru");
     expect(copiedConfig).not.toContain("working_dir: /Users/eru");

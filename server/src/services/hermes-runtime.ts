@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
-import type { HermesBootstrapImportSummary, RuntimeBundle } from "@paperclipai/shared";
+import { ensurePaperclipSkillSymlink, materializeRuntimeBundleWorkspace, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import type {
+  HermesBootstrapImportSummary,
+  PaperclipSharedContextManagedSkill,
+  RuntimeBundle,
+} from "@paperclipai/shared";
 import { resolveCompanyHermesHomeDir } from "../home-paths.js";
 import { buildPaperclipApiGovernanceSummary, derivePaperclipApiGovernancePolicy } from "./hermes-governance.js";
 import { importHermesBootstrapFromHome, type ImportedHermesBootstrap } from "./hermes-bootstrap.js";
@@ -560,12 +564,52 @@ async function clearStalePaperclipRuntimeArtifacts(cwd: string): Promise<void> {
   ]);
 }
 
+async function syncManagedSkillsIntoHermesHome(input: {
+  managedHome: string;
+  managedSkillsDir: string | null;
+  managedSkills: PaperclipSharedContextManagedSkill[];
+}): Promise<void> {
+  const skillsHome = path.join(input.managedHome, "skills");
+  await fs.mkdir(skillsHome, { recursive: true });
+  const allowedSkillNames = new Set(input.managedSkills.map((skill) => skill.name));
+  const entries = await fs.readdir(skillsHome, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (allowedSkillNames.has(entry.name)) continue;
+    const target = path.join(skillsHome, entry.name);
+    const existing = await fs.lstat(target).catch(() => null);
+    if (!existing?.isSymbolicLink()) continue;
+    const linkedPath = await fs.readlink(target).catch(() => null);
+    if (!linkedPath) continue;
+    const resolvedLinkedPath = path.isAbsolute(linkedPath)
+      ? linkedPath
+      : path.resolve(path.dirname(target), linkedPath);
+    if (!resolvedLinkedPath.includes(`${path.sep}.paperclip${path.sep}runtime${path.sep}skills${path.sep}`)) {
+      continue;
+    }
+    await fs.unlink(target);
+  }
+
+  if (!input.managedSkillsDir) {
+    return;
+  }
+
+  for (const skill of input.managedSkills) {
+    const source = path.join(input.managedSkillsDir, skill.name);
+    const target = path.join(skillsHome, skill.name);
+    const sourceExists = await pathExists(source);
+    if (!sourceExists) continue;
+    await ensurePaperclipSkillSymlink(source, target);
+  }
+}
+
 export async function prepareHermesAdapterConfigForExecution(input: {
   config: Record<string, unknown>;
   cwd: string;
   companyId?: string | null;
   managedHome?: string | null;
   runtimeBundle: RuntimeBundle | null;
+  managedSkillsDir?: string | null;
+  managedSkills?: PaperclipSharedContextManagedSkill[] | null;
   authToken?: string | null;
   persistedBootstrap?: ImportedHermesBootstrap | null;
   managedRuntime?: HermesManagedRuntimeResolution | null;
@@ -615,8 +659,16 @@ export async function prepareHermesAdapterConfigForExecution(input: {
   delete env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE;
   setHermesBootstrapSummaryEnv(env, importedBootstrapSummary);
   const authStore = (await readHermesAuthStore(managedHome)) ?? (managedHome !== sharedSource ? await readHermesAuthStore(sharedSource) : null);
+  await syncManagedSkillsIntoHermesHome({
+    managedHome,
+    managedSkillsDir: input.managedSkillsDir ?? null,
+    managedSkills: input.managedSkills ?? [],
+  });
   env.HERMES_HOME = managedHome;
   env.TERMINAL_CWD = input.cwd;
+  if (input.managedSkillsDir) {
+    env.PAPERCLIP_SKILLS_DIR = input.managedSkillsDir;
+  }
 
   const currentProvider = readString(input.config.provider);
   const currentModel = readString(input.config.model);
@@ -716,6 +768,8 @@ export async function prepareHermesAdapterConfigForExecution(input: {
         runtimeBundleRoot: materialized.root,
         runtimeInstructionsPath: materialized.instructionsPath,
         sharedContextPath,
+        managedSkillsDir: input.managedSkillsDir ?? null,
+        managedSkills: input.managedSkills ?? [],
       });
       await fs.mkdir(path.dirname(sharedContextPath), { recursive: true });
       await fs.writeFile(sharedContextPath, `${JSON.stringify(sharedContext, null, 2)}\n`, "utf8");
