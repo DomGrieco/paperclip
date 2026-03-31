@@ -55,14 +55,15 @@ function normalizeSelector(input: string): string {
 }
 
 function parseInclude(input: string | undefined): CompanyPortabilityInclude {
-  if (!input || !input.trim()) return { company: true, agents: true };
+  if (!input || !input.trim()) return { company: true, agents: true, managedSkills: true };
   const values = input.split(",").map((part) => part.trim().toLowerCase()).filter(Boolean);
   const include = {
     company: values.includes("company"),
     agents: values.includes("agents"),
+    managedSkills: values.includes("managedskills") || values.includes("managed-skills"),
   };
-  if (!include.company && !include.agents) {
-    throw new Error("Invalid --include value. Use one or both of: company,agents");
+  if (!include.company && !include.agents && !include.managedSkills) {
+    throw new Error("Invalid --include value. Use one or more of: company,agents,managed-skills");
   }
   return include;
 }
@@ -84,7 +85,7 @@ function isGithubUrl(input: string): boolean {
   return /^https?:\/\/github\.com\//i.test(input.trim());
 }
 
-async function resolveInlineSourceFromPath(inputPath: string): Promise<{
+export async function resolveInlineSourceFromPath(inputPath: string): Promise<{
   manifest: CompanyPortabilityManifest;
   files: Record<string, string>;
 }> {
@@ -105,6 +106,10 @@ async function resolveInlineSourceFromPath(inputPath: string): Promise<{
   for (const agent of manifest.agents ?? []) {
     const agentPath = agent.path.replace(/\\/g, "/");
     files[agentPath] = await readFile(path.join(manifestBaseDir, agentPath), "utf8");
+  }
+  for (const skill of manifest.managedSkills ?? []) {
+    const skillPath = skill.path.replace(/\\/g, "/");
+    files[skillPath] = await readFile(path.join(manifestBaseDir, skillPath), "utf8");
   }
 
   return { manifest, files };

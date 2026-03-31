@@ -1,6 +1,7 @@
 export interface CompanyPortabilityInclude {
   company: boolean;
   agents: boolean;
+  managedSkills: boolean;
 }
 
 export interface CompanyPortabilitySecretRequirement {
@@ -35,6 +36,20 @@ export interface CompanyPortabilityAgentManifestEntry {
   metadata: Record<string, unknown> | null;
 }
 
+export interface CompanyPortabilityManagedSkillScopeManifestEntry {
+  scopeType: "company" | "agent";
+  agentSlug: string | null;
+}
+
+export interface CompanyPortabilityManagedSkillManifestEntry {
+  slug: string;
+  name: string;
+  path: string;
+  description: string | null;
+  status: "active" | "archived";
+  scopes: CompanyPortabilityManagedSkillScopeManifestEntry[];
+}
+
 export interface CompanyPortabilityManifest {
   schemaVersion: number;
   generatedAt: string;
@@ -45,6 +60,7 @@ export interface CompanyPortabilityManifest {
   includes: CompanyPortabilityInclude;
   company: CompanyPortabilityCompanyManifestEntry | null;
   agents: CompanyPortabilityAgentManifestEntry[];
+  managedSkills: CompanyPortabilityManagedSkillManifestEntry[];
   requiredSecrets: CompanyPortabilitySecretRequirement[];
 }
 
@@ -99,6 +115,16 @@ export interface CompanyPortabilityPreviewAgentPlan {
   reason: string | null;
 }
 
+export interface CompanyPortabilityPreviewManagedSkillPlan {
+  path: string;
+  slug: string;
+  action: "create" | "update" | "skip";
+  plannedSlug: string;
+  plannedName: string;
+  existingManagedSkillId: string | null;
+  reason: string | null;
+}
+
 export interface CompanyPortabilityPreviewResult {
   include: CompanyPortabilityInclude;
   targetCompanyId: string | null;
@@ -108,6 +134,7 @@ export interface CompanyPortabilityPreviewResult {
   plan: {
     companyAction: "none" | "create" | "update";
     agentPlans: CompanyPortabilityPreviewAgentPlan[];
+    managedSkillPlans: CompanyPortabilityPreviewManagedSkillPlan[];
   };
   requiredSecrets: CompanyPortabilitySecretRequirement[];
   warnings: string[];
@@ -123,6 +150,13 @@ export interface CompanyPortabilityImportResult {
     action: "created" | "updated" | "unchanged";
   };
   agents: {
+    slug: string;
+    id: string | null;
+    action: "created" | "updated" | "skipped";
+    name: string;
+    reason: string | null;
+  }[];
+  managedSkills: {
     slug: string;
     id: string | null;
     action: "created" | "updated" | "skipped";

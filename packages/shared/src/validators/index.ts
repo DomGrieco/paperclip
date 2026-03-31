@@ -23,6 +23,8 @@ export {
   portabilitySecretRequirementSchema,
   portabilityCompanyManifestEntrySchema,
   portabilityAgentManifestEntrySchema,
+  portabilityManagedSkillScopeManifestEntrySchema,
+  portabilityManagedSkillManifestEntrySchema,
   portabilityManifestSchema,
   portabilitySourceSchema,
   portabilityTargetSchema,

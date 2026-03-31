@@ -402,6 +402,74 @@ describe("managed skill routes", () => {
     expect(mockManagedSkillService.listManagedSkills).not.toHaveBeenCalled();
   });
 
+  it("rejects non-board callers across managed-skill mutation and preview routes", async () => {
+    const app = createApp({
+      type: "agent",
+      companyId: "company-1",
+      agentId: "agent-1",
+    });
+
+    const createRes = await request(app).post("/api/companies/company-1/managed-skills").send({
+      name: "Skill Two",
+      slug: "skill-two",
+      bodyMarkdown: "# Skill Two",
+      status: "active",
+    });
+    const patchRes = await request(app)
+      .patch("/api/companies/company-1/managed-skills/skill-1")
+      .send({ description: "Updated" });
+    const archiveRes = await request(app).post("/api/companies/company-1/managed-skills/skill-1/archive");
+    const restoreRes = await request(app).post("/api/companies/company-1/managed-skills/skill-1/restore");
+    const listScopesRes = await request(app).get("/api/companies/company-1/managed-skills/skill-1/scopes");
+    const replaceScopesRes = await request(app)
+      .put("/api/companies/company-1/managed-skills/skill-1/scopes")
+      .send({ assignments: [{ scopeType: "company" }] });
+    const previewRes = await request(app).get("/api/companies/company-1/managed-skills/effective-preview");
+
+    expect(createRes.status).toBe(403);
+    expect(createRes.body.error).toBe("Board access required");
+    expect(patchRes.status).toBe(403);
+    expect(patchRes.body.error).toBe("Board access required");
+    expect(archiveRes.status).toBe(403);
+    expect(archiveRes.body.error).toBe("Board access required");
+    expect(restoreRes.status).toBe(403);
+    expect(restoreRes.body.error).toBe("Board access required");
+    expect(listScopesRes.status).toBe(403);
+    expect(listScopesRes.body.error).toBe("Board access required");
+    expect(replaceScopesRes.status).toBe(403);
+    expect(replaceScopesRes.body.error).toBe("Board access required");
+    expect(previewRes.status).toBe(403);
+    expect(previewRes.body.error).toBe("Board access required");
+    expect(mockManagedSkillService.createManagedSkill).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.updateManagedSkill).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.archiveManagedSkill).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.restoreManagedSkill).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.listManagedSkillScopes).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.replaceManagedSkillScopes).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.previewEffectiveSkills).not.toHaveBeenCalled();
+  });
+
+  it("rejects board users from other companies on managed-skill routes", async () => {
+    const app = createApp({
+      ...boardActor,
+      companyIds: ["company-2"],
+    });
+
+    const responses = await Promise.all([
+      request(app).get("/api/companies/company-1/managed-skills"),
+      request(app).post("/api/companies/company-1/managed-skills/skill-1/archive"),
+      request(app).get("/api/companies/company-1/managed-skills/effective-preview"),
+    ]);
+
+    for (const res of responses) {
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("User does not have access to this company");
+    }
+    expect(mockManagedSkillService.listManagedSkills).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.archiveManagedSkill).not.toHaveBeenCalled();
+    expect(mockManagedSkillService.previewEffectiveSkills).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for invalid scope payloads", async () => {
     const res = await request(createApp(boardActor))
       .put("/api/companies/company-1/managed-skills/skill-1/scopes")
