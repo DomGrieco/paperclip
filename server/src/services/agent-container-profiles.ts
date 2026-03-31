@@ -64,20 +64,20 @@ const PROFILES: Record<string, AgentContainerProfile> = {
     imageEnvName: null,
     browserCapable: false,
   },
-  cursor_local: {
-    adapterType: "cursor_local",
+  cursor: {
+    adapterType: "cursor",
     image: "paperclip/cursor-worker:dev",
     serviceName: "cursor-worker",
     runnerProvider: "agent_container",
     defaultCommand: "agent",
     workingDir: DEFAULT_WORKSPACE_PATH,
-    nativeHomePath: "/home/cursor/.cursor",
+    nativeHomePath: "/home/cursor",
     nativeSkillsPath: "/home/cursor/.cursor/skills",
     homeEnvName: "HOME",
     runtimeRootContainerPath: DEFAULT_RUNTIME_ROOT,
-    managedRuntimeRootEnvName: null,
-    managedRuntimeCommandEnvNames: [],
-    managedRuntimeContainerPath: null,
+    managedRuntimeRootEnvName: "PAPERCLIP_CURSOR_MANAGED_RUNTIME_ROOT",
+    managedRuntimeCommandEnvNames: ["PAPERCLIP_CURSOR_MANAGED_RUNTIME_COMMAND"],
+    managedRuntimeContainerPath: "/paperclip/runtime/cursor-managed",
     sharedAuthSourceEnvName: null,
     sharedAuthContainerPath: null,
     imageEnvName: null,
@@ -93,7 +93,8 @@ export function listAgentContainerProfiles(): AgentContainerProfile[] {
 }
 
 export function getAgentContainerProfile(adapterType: string): AgentContainerProfile {
-  const profile = PROFILES[adapterType];
+  const normalizedAdapterType = adapterType === "cursor_local" ? "cursor" : adapterType;
+  const profile = PROFILES[normalizedAdapterType];
   if (!profile) {
     throw new Error(`Unsupported agent container adapter type: ${adapterType}`);
   }

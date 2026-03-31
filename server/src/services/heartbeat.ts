@@ -49,6 +49,7 @@ import { issueRunGraphService } from "./issue-run-graph.js";
 import { resolveSwarmAdapterConfigOverride } from "./swarm-policy.js";
 import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
 import { prepareCodexAdapterConfigForExecution, injectCodexContainerExecConfig } from "./codex-runtime.js";
+import { prepareCursorAdapterConfigForExecution, injectCursorContainerExecConfig } from "./cursor-runtime.js";
 import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { buildAgentContainerLaunchPlan } from "./agent-container-plan.js";
@@ -2168,7 +2169,12 @@ export function heartbeatService(db: Db) {
           ? await prepareCodexAdapterConfigForExecution({
               config: resolvedConfig,
             })
-          : resolvedConfig;
+          : agent.adapterType === "cursor"
+            ? await prepareCursorAdapterConfigForExecution({
+                config: resolvedConfig,
+                cwd: executionWorkspace.cwd,
+              })
+            : resolvedConfig;
     const hermesContainerPlan = agent.adapterType === "hermes_local"
       ? buildHermesContainerLaunchPlan({
           runId: run.id,
@@ -2180,7 +2186,7 @@ export function heartbeatService(db: Db) {
       : null;
     const agentContainerPlan =
       hermesContainerPlan ??
-      (agent.adapterType === "codex_local"
+      (agent.adapterType === "codex_local" || agent.adapterType === "cursor"
         ? buildAgentContainerLaunchPlan({
             adapterType: agent.adapterType,
             runId: run.id,
@@ -2409,15 +2415,21 @@ export function heartbeatService(db: Db) {
           );
         }
       }
-      if (agent.adapterType === "codex_local" && agentContainerPlan) {
+      if ((agent.adapterType === "codex_local" || agent.adapterType === "cursor") && agentContainerPlan) {
         const launchedContainerId = runtimeServices.find(
           (service) => service.provider === "agent_container" && readNonEmptyString(service.providerRef),
         )?.providerRef ?? null;
-        executionConfig = injectCodexContainerExecConfig({
-          config: executionConfig,
-          plan: agentContainerPlan,
-          containerId: launchedContainerId,
-        });
+        executionConfig = agent.adapterType === "codex_local"
+          ? injectCodexContainerExecConfig({
+              config: executionConfig,
+              plan: agentContainerPlan,
+              containerId: launchedContainerId,
+            })
+          : injectCursorContainerExecConfig({
+              config: executionConfig,
+              plan: agentContainerPlan,
+              containerId: launchedContainerId,
+            });
       }
       const onAdapterMeta = async (meta: AdapterInvocationMeta) => {
         if (meta.env && secretKeys.size > 0) {

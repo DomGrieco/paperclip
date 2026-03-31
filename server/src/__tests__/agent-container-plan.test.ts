@@ -88,9 +88,14 @@ describe("agent container profiles", () => {
       nativeHomePath: "/home/codex/.codex",
       nativeSkillsPath: "/home/codex/.codex/skills",
     });
+    expect(getAgentContainerProfile("cursor")).toMatchObject({
+      adapterType: "cursor",
+      nativeHomePath: "/home/cursor",
+      nativeSkillsPath: "/home/cursor/.cursor/skills",
+    });
     expect(getAgentContainerProfile("cursor_local")).toMatchObject({
-      adapterType: "cursor_local",
-      nativeHomePath: "/home/cursor/.cursor",
+      adapterType: "cursor",
+      nativeHomePath: "/home/cursor",
       nativeSkillsPath: "/home/cursor/.cursor/skills",
     });
   });
@@ -200,6 +205,55 @@ describe("buildAgentContainerLaunchPlan", () => {
         expect.objectContaining({
           name: "PAPERCLIP_CODEX_MANAGED_RUNTIME_COMMAND",
           value: "/paperclip/runtime/codex-managed/bin/codex",
+          source: "managed_runtime",
+        }),
+      ]),
+    );
+  });
+
+  it("remaps Cursor managed runtime and HOME into the cursor worker container", () => {
+    const plan = buildAgentContainerLaunchPlan({
+      adapterType: "cursor",
+      runId: "run-cursor",
+      agentId: "agent-cursor",
+      executionWorkspaceCwd: "/tmp/paperclip/workspaces/cursor-1",
+      runtimeBundle: buildRuntimeBundle(),
+      executionConfig: {
+        command: "/tmp/paperclip/runtime-cache/cursor/channels/stable/install-home/.local/bin/agent",
+        env: {
+          HOME: "/tmp/paperclip/workspaces/cursor-1/.paperclip/cursor-home",
+          PAPERCLIP_RUNTIME_ROOT: "/tmp/paperclip/workspaces/cursor-1/.paperclip/runtime",
+          PAPERCLIP_RUNTIME_BUNDLE_PATH: "/tmp/paperclip/workspaces/cursor-1/.paperclip/runtime/bundle.json",
+          PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH: "/tmp/paperclip/workspaces/cursor-1/.paperclip/runtime/instructions.md",
+          PAPERCLIP_API_HELPER_PATH: "/tmp/paperclip/workspaces/cursor-1/.paperclip/runtime/paperclip-api",
+          PAPERCLIP_SHARED_CONTEXT_PATH: "/tmp/paperclip/workspaces/cursor-1/.paperclip/context/shared-context.json",
+          PAPERCLIP_CURSOR_MANAGED_RUNTIME_ROOT:
+            "/tmp/paperclip/runtime-cache/cursor/channels/stable/install-home",
+          PAPERCLIP_CURSOR_MANAGED_RUNTIME_COMMAND:
+            "/tmp/paperclip/runtime-cache/cursor/channels/stable/install-home/.local/bin/agent",
+        },
+      },
+    });
+
+    expect(plan.runner.provider).toBe("agent_container");
+    expect(plan.command).toEqual(["/paperclip/runtime/cursor-managed/.local/bin/agent"]);
+    expect(plan.mounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "agent_home", containerPath: "/home/cursor" }),
+        expect.objectContaining({ kind: "managed_runtime", containerPath: "/paperclip/runtime/cursor-managed" }),
+      ]),
+    );
+    expect(plan.env).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "HOME", value: "/home/cursor", source: "worker_home" }),
+        expect.objectContaining({
+          name: "PAPERCLIP_CURSOR_MANAGED_RUNTIME_ROOT",
+          value: "/paperclip/runtime/cursor-managed",
+          source: "managed_runtime",
+        }),
+        expect.objectContaining({
+          name: "PAPERCLIP_CURSOR_MANAGED_RUNTIME_COMMAND",
+          value: "/paperclip/runtime/cursor-managed/.local/bin/agent",
           source: "managed_runtime",
         }),
       ]),

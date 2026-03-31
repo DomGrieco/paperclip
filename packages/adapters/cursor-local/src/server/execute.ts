@@ -197,9 +197,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     runtimeBundle: context.paperclipRuntimeBundle,
   });
   const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
-  await ensureCursorSkillsInjected(onLog, materializedSkillsDir ? { skillsDir: materializedSkillsDir } : {});
 
   const envConfig = parseObject(config.env);
+  const configuredHome = asString(envConfig.HOME, "").trim();
+  const configuredSkillsHome = configuredHome ? path.join(configuredHome, ".cursor", "skills") : undefined;
+  await ensureCursorSkillsInjected(
+    onLog,
+    materializedSkillsDir
+      ? {
+          skillsDir: materializedSkillsDir,
+          ...(configuredSkillsHome ? { skillsHome: configuredSkillsHome } : {}),
+        }
+      : configuredSkillsHome
+        ? { skillsHome: configuredSkillsHome }
+        : {},
+  );
+
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
   const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
