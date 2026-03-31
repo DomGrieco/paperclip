@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { managedSkillScopes, managedSkills } from "@paperclipai/db";
+import { agents, managedSkillScopes, managedSkills, projects } from "@paperclipai/db";
 import { listPaperclipSkillEntries } from "@paperclipai/adapter-utils/server-utils";
 import type {
   CreateManagedSkill,
@@ -15,7 +15,7 @@ import type {
   ManagedSkillStatus,
   UpdateManagedSkill,
 } from "@paperclipai/shared";
-import { conflict, notFound } from "../errors.js";
+import { conflict, notFound, unprocessable } from "../errors.js";
 
 export type EffectiveSkillSource = "builtin" | ManagedSkillScopeType;
 
@@ -195,6 +195,47 @@ export async function materializeEffectiveSkills(input: {
 }
 
 export function managedSkillService(db: Db) {
+  async function assertProjectBelongsToCompany(companyId: string, projectId: string): Promise<void> {
+    const project = await db
+      .select({ id: projects.id, companyId: projects.companyId })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .then((rows) => rows[0] ?? null);
+    if (!project) {
+      throw notFound("Project not found");
+    }
+    if (project.companyId !== companyId) {
+      throw unprocessable("Project does not belong to this company");
+    }
+  }
+
+  async function assertAgentBelongsToCompany(companyId: string, agentId: string): Promise<void> {
+    const agent = await db
+      .select({ id: agents.id, companyId: agents.companyId })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .then((rows) => rows[0] ?? null);
+    if (!agent) {
+      throw notFound("Agent not found");
+    }
+    if (agent.companyId !== companyId) {
+      throw unprocessable("Agent does not belong to this company");
+    }
+  }
+
+  async function assertEffectivePreviewTargetsBelongToCompany(input: {
+    companyId: string;
+    projectId?: string | null;
+    agentId?: string | null;
+  }): Promise<void> {
+    if (input.projectId) {
+      await assertProjectBelongsToCompany(input.companyId, input.projectId);
+    }
+    if (input.agentId) {
+      await assertAgentBelongsToCompany(input.companyId, input.agentId);
+    }
+  }
+
   return {
     async listManagedSkills(companyId: string): Promise<ManagedSkill[]> {
       const rows = await db
@@ -280,6 +321,14 @@ export function managedSkillService(db: Db) {
     ): Promise<ManagedSkillScopeAssignment[]> {
       await this.getManagedSkill(companyId, skillId);
       const normalizedAssignments = dedupeScopeAssignments(companyId, assignments);
+      for (const assignment of normalizedAssignments) {
+        if (assignment.projectId) {
+          await assertProjectBelongsToCompany(companyId, assignment.projectId);
+        }
+        if (assignment.agentId) {
+          await assertAgentBelongsToCompany(companyId, assignment.agentId);
+        }
+      }
       return await db.transaction(async (tx) => {
         await tx
           .delete(managedSkillScopes)
@@ -349,6 +398,7 @@ export function managedSkillService(db: Db) {
       moduleDir: string;
       additionalBuiltInSkillDirs?: string[];
     }): Promise<EffectiveManagedSkill[]> {
+      await assertEffectivePreviewTargetsBelongToCompany(input);
       const builtIns = await loadBuiltInSkills(input.moduleDir, input.additionalBuiltInSkillDirs ?? []);
 
       const scopeConditions = [

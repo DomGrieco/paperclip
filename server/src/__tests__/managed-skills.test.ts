@@ -14,6 +14,7 @@ import {
   projects,
 } from "@paperclipai/db";
 import { managedSkillService, materializeEffectiveSkills } from "../services/managed-skills.js";
+import { notFound, unprocessable } from "../errors.js";
 
 type EmbeddedPostgresInstance = {
   initialise(): Promise<void>;
@@ -326,6 +327,107 @@ describe("managedSkillService.resolveEffectiveSkills", () => {
     });
 
     expect(resolved).toEqual([]);
+  });
+
+  it("rejects project scope assignments that target another company", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+
+    const [companyA] = await db.insert(companies).values({ name: "Paperclip A", issuePrefix: "PAA" }).returning();
+    const [companyB] = await db.insert(companies).values({ name: "Paperclip B", issuePrefix: "PBB" }).returning();
+    const [foreignProject] = await db.insert(projects).values({
+      companyId: companyB.id,
+      name: "Foreign Project",
+      urlKey: "foreign-project",
+    }).returning();
+    const skill = await service.createManagedSkill(companyA.id, {
+      name: "Scoped Skill",
+      slug: "scoped-skill",
+      description: "Company A skill",
+      bodyMarkdown: "# Skill\n",
+      status: "active",
+    });
+
+    await expect(
+      service.replaceManagedSkillScopes(companyA.id, skill.id, [
+        { scopeType: "project", projectId: foreignProject.id },
+      ]),
+    ).rejects.toMatchObject(unprocessable("Project does not belong to this company"));
+  });
+
+  it("rejects agent scope assignments that target another company", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+
+    const [companyA] = await db.insert(companies).values({ name: "Paperclip A", issuePrefix: "PAA" }).returning();
+    const [companyB] = await db.insert(companies).values({ name: "Paperclip B", issuePrefix: "PBB" }).returning();
+    const [foreignAgent] = await db.insert(agents).values({
+      companyId: companyB.id,
+      name: "Foreign Agent",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const skill = await service.createManagedSkill(companyA.id, {
+      name: "Scoped Skill",
+      slug: "scoped-skill",
+      description: "Company A skill",
+      bodyMarkdown: "# Skill\n",
+      status: "active",
+    });
+
+    await expect(
+      service.replaceManagedSkillScopes(companyA.id, skill.id, [
+        { scopeType: "agent", agentId: foreignAgent.id },
+      ]),
+    ).rejects.toMatchObject(unprocessable("Agent does not belong to this company"));
+  });
+
+  it("rejects effective preview targets that do not belong to the company", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+    const service = managedSkillService(db);
+    const builtInRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-builtins-"));
+    tempPaths.push(builtInRoot);
+    await createBuiltInSkill(builtInRoot, "paperclip", "Built in skill", "Built-in coordination skill");
+
+    const [companyA] = await db.insert(companies).values({ name: "Paperclip A", issuePrefix: "PAA" }).returning();
+    const [companyB] = await db.insert(companies).values({ name: "Paperclip B", issuePrefix: "PBB" }).returning();
+    const [foreignProject] = await db.insert(projects).values({
+      companyId: companyB.id,
+      name: "Foreign Project",
+      urlKey: "foreign-project",
+    }).returning();
+    const [foreignAgent] = await db.insert(agents).values({
+      companyId: companyB.id,
+      name: "Foreign Agent",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+
+    await expect(service.resolveEffectiveSkills({
+      companyId: companyA.id,
+      projectId: foreignProject.id,
+      moduleDir: "/tmp/does-not-matter",
+      additionalBuiltInSkillDirs: [builtInRoot],
+    })).rejects.toMatchObject(unprocessable("Project does not belong to this company"));
+
+    await expect(service.resolveEffectiveSkills({
+      companyId: companyA.id,
+      agentId: foreignAgent.id,
+      moduleDir: "/tmp/does-not-matter",
+      additionalBuiltInSkillDirs: [builtInRoot],
+    })).rejects.toMatchObject(unprocessable("Agent does not belong to this company"));
   });
 
   it("materializes effective skills into a runtime skills directory", async () => {
