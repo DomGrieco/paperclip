@@ -345,6 +345,65 @@ describe("resolveRuntimeBundle", () => {
     ]);
   }, 20_000);
 
+  it("composes issue workspace overrides into the planned runner snapshot", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [project] = await db.insert(projects).values({
+      companyId: company.id,
+      name: "Workspace Policy Project",
+      status: "in_progress",
+      executionWorkspacePolicy: {
+        enabled: true,
+        defaultMode: "shared_workspace",
+      },
+    }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      projectId: project.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      projectId: project.id,
+      title: "Respect isolated workspace override",
+      description: "Bundle should reflect issue-level workspace isolation.",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+      executionWorkspaceSettings: {
+        mode: "isolated_workspace",
+      },
+    }).returning();
+
+    const bundle = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runId: null,
+      runtime: "codex",
+    });
+
+    expect(bundle.runner).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
+    expect(bundle.verification.runner).toEqual(bundle.runner);
+  }, 20_000);
+
   it("includes published shared-context items in the runtime recall packet with governance-aware scoping", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);

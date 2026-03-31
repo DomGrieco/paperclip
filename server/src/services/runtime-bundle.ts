@@ -14,6 +14,12 @@ import type {
 } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
+import {
+  buildExecutionWorkspaceAdapterConfig,
+  parseIssueExecutionWorkspaceSettings,
+  parseProjectExecutionWorkspacePolicy,
+  resolveExecutionWorkspaceMode,
+} from "./execution-workspace-policy.js";
 import { sharedContextService } from "./shared-context-publications.js";
 
 type ResolveRuntimeBundleInput = {
@@ -119,6 +125,7 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
         updatedAt: issues.updatedAt,
         evidencePolicy: issues.evidencePolicy,
         evidencePolicySource: issues.evidencePolicySource,
+        executionWorkspaceSettings: issues.executionWorkspaceSettings,
         reviewReadyAt: issues.reviewReadyAt,
         lastVerificationRunId: issues.lastVerificationRunId,
       })
@@ -191,7 +198,51 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
   const maxRepairAttempts = resolveMaxRepairAttempts(policySnapshot);
   const effectiveEvidencePolicy = issue.evidencePolicy as RuntimeBundle["policy"]["evidencePolicy"];
   const effectiveEvidencePolicySource = issue.evidencePolicySource as RuntimeBundle["policy"]["evidencePolicySource"];
-  const plannedRunner = resolvePlannedRunnerSnapshot(project?.executionWorkspacePolicy ?? null);
+  const rawProjectWorkspacePolicy =
+    project?.executionWorkspacePolicy && typeof project.executionWorkspacePolicy === "object"
+      ? (project.executionWorkspacePolicy as Record<string, unknown>)
+      : null;
+  const rawIssueWorkspaceSettings =
+    issue.executionWorkspaceSettings && typeof issue.executionWorkspaceSettings === "object"
+      ? (issue.executionWorkspaceSettings as Record<string, unknown>)
+      : null;
+  const hasProjectWorkspacePolicy = rawProjectWorkspacePolicy !== null && Object.keys(rawProjectWorkspacePolicy).length > 0;
+  const hasIssueWorkspaceSettings = rawIssueWorkspaceSettings !== null && Object.keys(rawIssueWorkspaceSettings).length > 0;
+  const plannedRunner = (() => {
+    if (!hasProjectWorkspacePolicy && !hasIssueWorkspaceSettings) {
+      return resolvePlannedRunnerSnapshot(rawProjectWorkspacePolicy);
+    }
+
+    const parsedProjectWorkspacePolicy = parseProjectExecutionWorkspacePolicy(rawProjectWorkspacePolicy);
+    const projectWorkspacePolicy =
+      parsedProjectWorkspacePolicy && !parsedProjectWorkspacePolicy.enabled && hasProjectWorkspacePolicy
+        ? { ...parsedProjectWorkspacePolicy, enabled: true }
+        : parsedProjectWorkspacePolicy;
+    const issueWorkspaceSettings = parseIssueExecutionWorkspaceSettings(rawIssueWorkspaceSettings);
+    const executionWorkspaceMode = resolveExecutionWorkspaceMode({
+      projectPolicy: projectWorkspacePolicy,
+      issueSettings: issueWorkspaceSettings,
+      legacyUseProjectWorkspace: null,
+    });
+    const effectiveWorkspaceConfig = buildExecutionWorkspaceAdapterConfig({
+      agentConfig: {},
+      projectPolicy: projectWorkspacePolicy,
+      issueSettings: issueWorkspaceSettings,
+      mode: executionWorkspaceMode,
+      legacyUseProjectWorkspace: null,
+      swarmSubtask: currentSwarmSubtask,
+    });
+
+    return resolvePlannedRunnerSnapshot({
+      executionMode: executionWorkspaceMode,
+      workspaceStrategyType:
+        typeof effectiveWorkspaceConfig.workspaceStrategy === "object" &&
+        effectiveWorkspaceConfig.workspaceStrategy !== null &&
+        typeof (effectiveWorkspaceConfig.workspaceStrategy as Record<string, unknown>).type === "string"
+          ? ((effectiveWorkspaceConfig.workspaceStrategy as Record<string, unknown>).type as string)
+          : null,
+    });
+  })();
   const effectiveRunner = applyVerificationRunnerPolicy({
     planned: plannedRunner,
     runType: run?.runType ?? null,

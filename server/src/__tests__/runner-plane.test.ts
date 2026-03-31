@@ -31,6 +31,23 @@ describe("runner-plane", () => {
     });
   });
 
+  it("accepts normalized execution mode and strategy inputs from composed workspace policy", () => {
+    expect(
+      resolvePlannedRunnerSnapshot({
+        executionMode: "isolated_workspace",
+        workspaceStrategyType: "git_worktree",
+      }),
+    ).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
+  });
+
   it("upgrades the observed runner snapshot when adapter-managed runtime services are returned", () => {
     const planned = resolvePlannedRunnerSnapshot({
       defaultMode: "isolated_workspace",

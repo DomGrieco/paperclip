@@ -7,9 +7,17 @@ export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unkno
       ? (projectPolicy.workspaceStrategy as Record<string, unknown>)
       : null;
   const defaultMode =
-    projectPolicy && typeof projectPolicy.defaultMode === "string" ? (projectPolicy.defaultMode as string) : null;
+    projectPolicy && typeof projectPolicy.defaultMode === "string"
+      ? (projectPolicy.defaultMode as string)
+      : projectPolicy && typeof projectPolicy.executionMode === "string"
+        ? (projectPolicy.executionMode as string)
+        : null;
   const strategyType =
-    workspaceStrategy && typeof workspaceStrategy.type === "string" ? (workspaceStrategy.type as string) : null;
+    workspaceStrategy && typeof workspaceStrategy.type === "string"
+      ? (workspaceStrategy.type as string)
+      : projectPolicy && typeof projectPolicy.workspaceStrategyType === "string"
+        ? (projectPolicy.workspaceStrategyType as string)
+        : null;
 
   if (strategyType === "cloud_sandbox") {
     return {
