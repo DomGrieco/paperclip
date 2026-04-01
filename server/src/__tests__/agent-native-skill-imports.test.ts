@@ -67,10 +67,11 @@ async function createTempDatabase(): Promise<string> {
   tempPaths.push(dataDir);
 
   const port = await getAvailablePort();
+  const password = "paperclip";
   const instance = new EmbeddedPostgres({
     databaseDir: dataDir,
     user: "paperclip",
-    password: "paperclip",
+    password,
     port,
     persistent: true,
     initdbFlags: ["--encoding=UTF8", "--locale=C"],
@@ -80,9 +81,9 @@ async function createTempDatabase(): Promise<string> {
   await instance.start();
   runningInstances.push(instance);
 
-  const adminUrl = `postgres://paperclip:paperclip@127.0.0.1:${port}/postgres`;
+  const adminUrl = `postgres://paperclip:${password}@127.0.0.1:${port}/postgres`;
   await ensurePostgresDatabase(adminUrl, "paperclip");
-  return `postgres://paperclip:paperclip@127.0.0.1:${port}/paperclip`;
+  return `postgres://paperclip:${password}@127.0.0.1:${port}/paperclip`;
 }
 
 function managedSkillMarkdown(name: string, description: string, heading = name, body = "Imported body") {
@@ -128,7 +129,11 @@ describe("importNativeSkillsFromCompletedRun", () => {
 
     const projectedSource = path.join(workspaceRoot, ".paperclip", "runtime", "skills", "projected-skill");
     await fs.promises.mkdir(projectedSource, { recursive: true });
-    await fs.promises.writeFile(path.join(projectedSource, "SKILL.md"), managedSkillMarkdown("Projected Skill", "Projected"), "utf8");
+    await fs.promises.writeFile(
+      path.join(projectedSource, "SKILL.md"),
+      managedSkillMarkdown("Projected Skill", "Projected"),
+      "utf8",
+    );
     await fs.promises.symlink(projectedSource, path.join(skillsRoot, "projected-skill"));
 
     const authoredDir = path.join(skillsRoot, "native-research");
@@ -167,7 +172,11 @@ describe("importNativeSkillsFromCompletedRun", () => {
       }),
     );
 
-    const stored = await db.select().from(managedSkills).where(eq(managedSkills.id, imported[0]!.id)).then((rows) => rows[0] ?? null);
+    const stored = await db
+      .select()
+      .from(managedSkills)
+      .where(eq(managedSkills.id, imported[0]!.id))
+      .then((rows) => rows[0] ?? null);
     expect(stored).toEqual(
       expect.objectContaining({
         companyId: company.id,
@@ -178,7 +187,7 @@ describe("importNativeSkillsFromCompletedRun", () => {
         importedSourcePath: authoredDir,
       }),
     );
-    expect(stored?.importedFromRunId).toBeTruthy();
+    expect(stored?.importedFromRunId).toBe(runId);
     expect(stored?.importedAt).toBeInstanceOf(Date);
 
     await db.insert(managedSkillScopes).values({
@@ -276,5 +285,83 @@ describe("importNativeSkillsFromCompletedRun", () => {
     expect(rows[0]?.status).toBe("pending_review");
     expect(rows[0]?.bodyMarkdown).toContain("Updated import");
     expect(rows[0]?.importedFromRunId).toBe(secondRunId);
+  });
+
+  it("does not overwrite an already-reviewed managed skill imported from the same source path", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "PAP" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Cursor Worker",
+      role: "engineer",
+      adapterType: "cursor",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-cursor-native-home-"));
+    tempPaths.push(workspaceRoot);
+    const cursorHome = path.join(workspaceRoot, ".paperclip", "cursor-home");
+    const skillsRoot = path.join(cursorHome, ".cursor", "skills");
+    const authoredDir = path.join(skillsRoot, "cursor-native");
+    await fs.promises.mkdir(authoredDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(authoredDir, "SKILL.md"),
+      managedSkillMarkdown("Cursor Native", "Imported from cursor home", "Cursor Native", "new body"),
+      "utf8",
+    );
+
+    const existingId = crypto.randomUUID();
+    await db.insert(managedSkills).values({
+      id: existingId,
+      companyId: company.id,
+      name: "Cursor Native",
+      slug: "cursor-native",
+      description: "Reviewed version",
+      bodyMarkdown: managedSkillMarkdown("Cursor Native", "Reviewed version", "Cursor Native", "reviewed body"),
+      status: "active",
+      importedFromAgentId: agent.id,
+      importedSourcePath: authoredDir,
+      importedAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const runId = crypto.randomUUID();
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId: company.id,
+      agentId: agent.id,
+      status: "completed",
+      runType: "worker",
+      updatedAt: new Date(),
+    });
+
+    const imported = await importNativeSkillsFromCompletedRun(db, {
+      companyId: company.id,
+      agentId: agent.id,
+      runId,
+      adapterType: "cursor",
+      executionWorkspaceCwd: workspaceRoot,
+      executionConfig: {
+        env: {
+          HOME: cursorHome,
+        },
+      },
+    });
+
+    expect(imported).toEqual([]);
+
+    const stored = await db
+      .select()
+      .from(managedSkills)
+      .where(eq(managedSkills.id, existingId))
+      .then((rows) => rows[0] ?? null);
+    expect(stored?.status).toBe("active");
+    expect(stored?.bodyMarkdown).toContain("reviewed body");
+    expect(stored?.importedFromRunId).toBeNull();
   });
 });
