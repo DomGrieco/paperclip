@@ -207,6 +207,7 @@ export type {
   FinanceByKind,
   HeartbeatRun,
   HeartbeatRunEvent,
+  PaperclipRuntimeObservability,
   AgentRuntimeState,
   AgentTaskSession,
   AgentWakeupRequest,

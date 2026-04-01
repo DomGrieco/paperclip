@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { swarmPlanSchema, swarmSubtaskSchema } from "@paperclipai/shared";
-import type { BillingType, RuntimeBundle, RuntimeBundleTarget, SwarmPlan, SwarmSubtask } from "@paperclipai/shared";
+import type { BillingType, PaperclipRuntimeObservability, RuntimeBundle, RuntimeBundleTarget, SwarmPlan, SwarmSubtask } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -29,7 +29,12 @@ import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } fr
 import { costService } from "./costs.js";
 import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService } from "./secrets.js";
-import { resolveCompanyHermesHomeDir, resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
+import {
+  resolveCompanyHermesHomeDir,
+  resolveCompanySharedRuntimeRoot,
+  resolveDefaultAgentWorkspaceDir,
+  resolveManagedProjectWorkspaceDir,
+} from "../home-paths.js";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
 import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 import {
@@ -53,6 +58,7 @@ import { prepareCursorAdapterConfigForExecution, injectCursorContainerExecConfig
 import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { buildAgentContainerLaunchPlan } from "./agent-container-plan.js";
+import { getAgentContainerProfile } from "./agent-container-profiles.js";
 import { injectAgentContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
@@ -151,6 +157,66 @@ export function attachPaperclipSharedContextPacketToContext(
     managedSkills: input.managedSkills,
   });
   return contextSnapshot;
+}
+
+function resolveManagedRuntimeEnvPrefix(adapterType: string): string | null {
+  switch (adapterType) {
+    case "hermes_local":
+      return "PAPERCLIP_HERMES_MANAGED_RUNTIME";
+    case "codex_local":
+      return "PAPERCLIP_CODEX_MANAGED_RUNTIME";
+    case "cursor":
+      return "PAPERCLIP_CURSOR_MANAGED_RUNTIME";
+    default:
+      return null;
+  }
+}
+
+export function buildPaperclipRuntimeObservabilitySnapshot(input: {
+  adapterType: string;
+  companyId: string;
+  executionWorkspaceMode: string | null;
+  runtimeChannel: string | null;
+  runtimeVersion: string | null;
+  nativeHomeRoot: string | null;
+  nativeSkillsPath: string | null;
+  managedSkillsDir: string | null;
+  managedSkillCount: number;
+  runtimeService: {
+    serviceName: string | null;
+    provider: string | null;
+    providerRef: string | null;
+  } | null;
+  runStartedAt: Date | null;
+  agentLastHeartbeatAt: Date | null;
+}): PaperclipRuntimeObservability {
+  const profile = getAgentContainerProfile(input.adapterType);
+  const runStartedAt = input.runStartedAt ? new Date(input.runStartedAt).toISOString() : null;
+  const agentLastHeartbeatAt = input.agentLastHeartbeatAt ? new Date(input.agentLastHeartbeatAt).toISOString() : null;
+  return {
+    adapterContainerProfile: {
+      adapterType: profile.adapterType,
+      serviceName: profile.serviceName,
+      runnerProvider: profile.runnerProvider,
+      browserCapable: profile.browserCapable,
+    },
+    runtimeChannel: input.runtimeChannel,
+    runtimeVersion: input.runtimeVersion,
+    executionWorkspaceMode: input.executionWorkspaceMode,
+    nativeHomeRoot: input.nativeHomeRoot,
+    nativeSkillsProjection: {
+      nativeSkillsPath: input.nativeSkillsPath,
+      managedSkillsDir: input.managedSkillsDir,
+      managedSkillCount: input.managedSkillCount,
+    },
+    companySharedStateRoot: resolveCompanySharedRuntimeRoot(input.companyId),
+    runtimeService: input.runtimeService,
+    heartbeatTimestampConsistency: {
+      runStartedAt,
+      agentLastHeartbeatAt,
+      matchesRunStartedAt: Boolean(runStartedAt && agentLastHeartbeatAt && runStartedAt === agentLastHeartbeatAt),
+    },
+  };
 }
 
 function deriveRepoNameFromRepoUrl(repoUrl: string | null): string | null {
@@ -2203,16 +2269,29 @@ export function heartbeatService(db: Db) {
     } else {
       delete context.paperclipHermesContainerPlan;
     }
+    if (agentContainerPlan) {
+      context.paperclipAgentContainerPlan = agentContainerPlan;
+    } else {
+      delete context.paperclipAgentContainerPlan;
+    }
     const executionConfigWithRuntimeLaunch = injectAgentContainerLauncherService({
       config: executionConfig,
       plan: agentContainerPlan,
     });
+    const executionEnv = parseObject(executionConfigWithRuntimeLaunch.env);
+    const managedRuntimeEnvPrefix = resolveManagedRuntimeEnvPrefix(agent.adapterType);
+    const managedRuntimeChannel = managedRuntimeEnvPrefix
+      ? readNonEmptyString(executionEnv[`${managedRuntimeEnvPrefix}_CHANNEL`]) ?? null
+      : null;
+    const managedRuntimeVersion = managedRuntimeEnvPrefix
+      ? readNonEmptyString(executionEnv[`${managedRuntimeEnvPrefix}_VERSION`]) ?? null
+      : null;
     attachPaperclipSharedContextPacketToContext(context, {
       runtimeBundle,
       workspaceCwd: executionWorkspace.cwd,
-      runtimeBundleRoot: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_ROOT) ?? null,
-      runtimeInstructionsPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH) ?? null,
-      sharedContextPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_SHARED_CONTEXT_PATH) ?? null,
+      runtimeBundleRoot: readNonEmptyString(executionEnv.PAPERCLIP_RUNTIME_ROOT) ?? null,
+      runtimeInstructionsPath: readNonEmptyString(executionEnv.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH) ?? null,
+      sharedContextPath: readNonEmptyString(executionEnv.PAPERCLIP_SHARED_CONTEXT_PATH) ?? null,
       managedSkillsDir: materializedSkills.skillsDir,
       managedSkills: context.paperclipEffectiveSkills as Array<{
         name: string;
@@ -2269,6 +2348,34 @@ export function heartbeatService(db: Db) {
     let stderrExcerpt = "";
     try {
       const startedAt = run.startedAt ?? new Date();
+      const refreshRuntimeObservability = (
+        services: Array<{ serviceName?: string | null; provider?: string | null; providerRef?: string | null }> = [],
+      ) => {
+        const primaryRuntimeService = services.find(
+          (service) => readNonEmptyString(service.providerRef) || readNonEmptyString(service.serviceName),
+        );
+        context.paperclipRuntimeObservability = buildPaperclipRuntimeObservabilitySnapshot({
+          adapterType: agent.adapterType,
+          companyId: agent.companyId,
+          executionWorkspaceMode,
+          runtimeChannel: managedRuntimeChannel,
+          runtimeVersion: managedRuntimeVersion,
+          nativeHomeRoot: agentContainerPlan?.nativeHomePath ?? hermesContainerPlan?.nativeHomePath ?? null,
+          nativeSkillsPath: agentContainerPlan?.nativeSkillsPath ?? hermesContainerPlan?.nativeSkillsPath ?? null,
+          managedSkillsDir: materializedSkills.skillsDir,
+          managedSkillCount: Array.isArray(context.paperclipEffectiveSkills) ? context.paperclipEffectiveSkills.length : 0,
+          runtimeService: primaryRuntimeService
+            ? {
+                serviceName: readNonEmptyString(primaryRuntimeService.serviceName) ?? null,
+                provider: readNonEmptyString(primaryRuntimeService.provider) ?? null,
+                providerRef: readNonEmptyString(primaryRuntimeService.providerRef) ?? null,
+              }
+            : null,
+          runStartedAt: startedAt,
+          agentLastHeartbeatAt: startedAt,
+        });
+      };
+      refreshRuntimeObservability();
       const runningWithSession = await db
         .update(heartbeatRuns)
         .set({
@@ -2392,6 +2499,7 @@ export function heartbeatService(db: Db) {
         context.paperclipRuntimeServices = runtimeServices;
         context.paperclipRuntimePrimaryUrl =
           runtimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+        refreshRuntimeObservability(runtimeServices);
         await db
           .update(heartbeatRuns)
           .set({
@@ -2506,6 +2614,7 @@ export function heartbeatService(db: Db) {
         context.paperclipRuntimeServices = observedRuntimeServices;
         context.paperclipRuntimePrimaryUrl =
           observedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+        refreshRuntimeObservability(observedRuntimeServices);
         await db
           .update(heartbeatRuns)
           .set({

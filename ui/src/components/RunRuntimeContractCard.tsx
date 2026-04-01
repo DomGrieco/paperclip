@@ -1,6 +1,8 @@
 import type {
+  AgentContainerLaunchPlan,
   HeartbeatRun,
   HermesContainerLaunchPlan,
+  PaperclipRuntimeObservability,
   PaperclipSharedContextPacket,
   RuntimeBundle,
   RuntimeBundleRunner,
@@ -57,6 +59,18 @@ function asLaunchPlan(value: unknown): HermesContainerLaunchPlan | null {
   return record as unknown as HermesContainerLaunchPlan;
 }
 
+function asAgentContainerLaunchPlan(value: unknown): AgentContainerLaunchPlan | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return record as unknown as AgentContainerLaunchPlan;
+}
+
+function asRuntimeObservability(value: unknown): PaperclipRuntimeObservability | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return record as unknown as PaperclipRuntimeObservability;
+}
+
 function asSharedContextPacket(value: unknown): PaperclipSharedContextPacket | null {
   const record = asRecord(value);
   if (!record) return null;
@@ -86,8 +100,11 @@ function DetailRow({ label, value, mono = false }: { label: string; value: strin
 export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
   const context = asRecord(run.contextSnapshot);
   const plan = asLaunchPlan(context?.paperclipHermesContainerPlan);
+  const agentContainerPlan = asAgentContainerLaunchPlan(context?.paperclipAgentContainerPlan);
+  const surfacedPlan = agentContainerPlan ?? plan;
   const sharedContextPacket = asSharedContextPacket(context?.paperclipSharedContextPacket);
   const runtimeBundle = asRuntimeBundle(context?.paperclipRuntimeBundle);
+  const runtimeObservability = asRuntimeObservability(context?.paperclipRuntimeObservability);
   const runtimeServices = getRuntimeServices(context?.paperclipRuntimeServices);
   const swarm = asRecord(runtimeBundle?.swarm ?? null);
   const currentSubtask = asRecord(swarm?.currentSubtask);
@@ -105,13 +122,13 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
     ? currentSubtask.forbiddenPaths.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     : [];
   const runner =
-    plan?.runner ??
+    surfacedPlan?.runner ??
     run.runnerSnapshotJson ??
     sharedContextPacket?.runner ??
     runtimeBundle?.runner ??
     null;
 
-  if (!runner && !plan && !sharedContextPacket && !runtimeBundle && runtimeServices.length === 0) {
+  if (!runner && !surfacedPlan && !sharedContextPacket && !runtimeBundle && !runtimeObservability && runtimeServices.length === 0) {
     return null;
   }
 
@@ -153,29 +170,31 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
           </div>
         ) : null}
 
-        {plan ? (
+        {surfacedPlan ? (
           <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Hermes Container Plan</div>
-              <div className="text-[11px] text-muted-foreground">{plan.mounts.length} mounts · {plan.env.length} env vars</div>
+              <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+                {agentContainerPlan ? "Agent Container Plan" : "Hermes Container Plan"}
+              </div>
+              <div className="text-[11px] text-muted-foreground">{surfacedPlan.mounts.length} mounts · {surfacedPlan.env.length} env vars</div>
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
-              <DetailRow label="Image" value={plan.image} mono />
-              <DetailRow label="Command" value={plan.command.join(" ") || "—"} mono />
-              <DetailRow label="Model" value={plan.model ?? "—"} mono />
-              <DetailRow label="Provider" value={plan.provider ?? "—"} mono />
-              <DetailRow label="Working Dir" value={renderPath(plan.workingDir)} mono />
-              <DetailRow label="Workspace Path" value={renderPath(plan.workspacePath)} mono />
-              <DetailRow label="Worker Home" value={renderPath(plan.agentHomePath)} mono />
-              <DetailRow label="Runtime Bundle Root" value={renderPath(plan.runtimeBundleRoot)} mono />
-              <DetailRow label="Shared Auth Source" value={renderPath(plan.sharedAuthSourcePath)} mono />
-              <DetailRow label="Shared Context Path" value={renderPath(plan.sharedContextPath)} mono />
+              <DetailRow label="Image" value={surfacedPlan.image} mono />
+              <DetailRow label="Command" value={surfacedPlan.command.join(" ") || "—"} mono />
+              <DetailRow label="Model" value={surfacedPlan.model ?? "—"} mono />
+              <DetailRow label="Provider" value={surfacedPlan.provider ?? "—"} mono />
+              <DetailRow label="Working Dir" value={renderPath(surfacedPlan.workingDir)} mono />
+              <DetailRow label="Workspace Path" value={renderPath(surfacedPlan.workspacePath)} mono />
+              <DetailRow label="Worker Home" value={renderPath(surfacedPlan.agentHomePath)} mono />
+              <DetailRow label="Runtime Bundle Root" value={renderPath(surfacedPlan.runtimeBundleRoot)} mono />
+              <DetailRow label="Shared Auth Source" value={renderPath(surfacedPlan.sharedAuthSourcePath)} mono />
+              <DetailRow label="Shared Context Path" value={renderPath(surfacedPlan.sharedContextPath)} mono />
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <div>
                 <div className="mb-2 text-xs font-medium text-muted-foreground">Mounts</div>
                 <div className="space-y-2">
-                  {plan.mounts.map((mount) => (
+                  {surfacedPlan.mounts.map((mount) => (
                     <div key={`${mount.kind}-${mount.containerPath}`} className="rounded-lg border border-border/60 bg-background/50 px-3 py-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-medium text-foreground">{humanize(mount.kind)}</span>
@@ -193,9 +212,9 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
               <div>
                 <div className="mb-2 text-xs font-medium text-muted-foreground">Runtime Service</div>
                 <div className="rounded-lg border border-border/60 bg-background/50 px-3 py-2 text-xs space-y-1">
-                  <div><span className="text-muted-foreground">Name: </span><span className="font-medium text-foreground">{plan.runtimeService.serviceName}</span></div>
-                  <div><span className="text-muted-foreground">Scope: </span><span className="text-foreground">{humanize(plan.runtimeService.scopeType)} · {plan.runtimeService.scopeId}</span></div>
-                  <div><span className="text-muted-foreground">Owner Agent: </span><span className="font-mono text-foreground">{plan.runtimeService.ownerAgentId}</span></div>
+                  <div><span className="text-muted-foreground">Name: </span><span className="font-medium text-foreground">{surfacedPlan.runtimeService.serviceName}</span></div>
+                  <div><span className="text-muted-foreground">Scope: </span><span className="text-foreground">{humanize(surfacedPlan.runtimeService.scopeType)} · {surfacedPlan.runtimeService.scopeId}</span></div>
+                  <div><span className="text-muted-foreground">Owner Agent: </span><span className="font-mono text-foreground">{surfacedPlan.runtimeService.ownerAgentId}</span></div>
                 </div>
               </div>
             </div>
@@ -276,6 +295,27 @@ export function RunRuntimeContractCard({ run }: { run: HeartbeatRun }) {
                 </div>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {runtimeObservability ? (
+          <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-3">
+            <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Runtime Observability</div>
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-4">
+              <DetailRow label="Adapter Container Profile" value={humanize(runtimeObservability.adapterContainerProfile.adapterType)} />
+              <DetailRow label="Runtime Channel" value={runtimeObservability.runtimeChannel ? humanize(runtimeObservability.runtimeChannel) : "—"} />
+              <DetailRow label="Runtime Version" value={runtimeObservability.runtimeVersion ?? "—"} mono />
+              <DetailRow label="Execution Workspace Mode" value={runtimeObservability.executionWorkspaceMode ? humanize(runtimeObservability.executionWorkspaceMode) : "—"} />
+              <DetailRow label="Native Home Root" value={renderPath(runtimeObservability.nativeHomeRoot)} mono />
+              <DetailRow label="Native Skills Projection" value={String(runtimeObservability.nativeSkillsProjection.managedSkillCount)} />
+              <DetailRow label="Company Shared State Root" value={renderPath(runtimeObservability.companySharedStateRoot)} mono />
+              <DetailRow label="Runtime Service/Container ID" value={runtimeObservability.runtimeService?.providerRef ?? "—"} mono />
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+              <DetailRow label="Native Skills Path" value={renderPath(runtimeObservability.nativeSkillsProjection.nativeSkillsPath)} mono />
+              <DetailRow label="Managed Skills Dir" value={renderPath(runtimeObservability.nativeSkillsProjection.managedSkillsDir)} mono />
+              <DetailRow label="Heartbeat Timestamp Consistency" value={runtimeObservability.heartbeatTimestampConsistency.matchesRunStartedAt ? "Matches run start" : "Drift detected"} />
+            </div>
           </div>
         ) : null}
 

@@ -10,6 +10,7 @@ import type {
   WakeupRequestStatus,
 } from "../constants.js";
 import type {
+  AgentContainerLaunchPlan,
   HermesContainerLaunchPlan,
   OrchestrationArtifactBundle,
   OrchestrationPolicySnapshot,
@@ -18,10 +19,41 @@ import type {
   RuntimeBundleRunner,
 } from "./orchestration.js";
 
+export interface PaperclipRuntimeObservability {
+  adapterContainerProfile: {
+    adapterType: string;
+    serviceName: string;
+    runnerProvider: "hermes_container" | "agent_container";
+    browserCapable: boolean;
+  };
+  runtimeChannel: string | null;
+  runtimeVersion: string | null;
+  executionWorkspaceMode: string | null;
+  nativeHomeRoot: string | null;
+  nativeSkillsProjection: {
+    nativeSkillsPath: string | null;
+    managedSkillsDir: string | null;
+    managedSkillCount: number;
+  };
+  companySharedStateRoot: string | null;
+  runtimeService: {
+    serviceName: string | null;
+    provider: string | null;
+    providerRef: string | null;
+  } | null;
+  heartbeatTimestampConsistency: {
+    runStartedAt: string | null;
+    agentLastHeartbeatAt: string | null;
+    matchesRunStartedAt: boolean;
+  };
+}
+
 export interface HeartbeatContextSnapshot extends Record<string, unknown> {
   paperclipRuntimeBundle?: RuntimeBundle | null;
   paperclipSharedContextPacket?: PaperclipSharedContextPacket | null;
   paperclipHermesContainerPlan?: HermesContainerLaunchPlan | null;
+  paperclipAgentContainerPlan?: AgentContainerLaunchPlan | null;
+  paperclipRuntimeObservability?: PaperclipRuntimeObservability | null;
 }
 
 export interface HeartbeatRun {

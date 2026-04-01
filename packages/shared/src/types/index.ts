@@ -76,6 +76,7 @@ export type { FinanceEvent, FinanceSummary, FinanceByBiller, FinanceByKind } fro
 export type {
   HeartbeatRun,
   HeartbeatRunEvent,
+  PaperclipRuntimeObservability,
   AgentRuntimeState,
   AgentTaskSession,
   AgentWakeupRequest,
