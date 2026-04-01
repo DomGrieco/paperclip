@@ -22,7 +22,7 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
+import { parseCodexJsonl, isCodexTransientServerError, isCodexUnknownSessionError } from "./parse.js";
 import { pathExists, prepareWorktreeCodexHome, resolveCodexHomeDir } from "./codex-home.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -567,6 +567,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
+  const maybeRetryTransientServerError = async (
+    attempt: Awaited<ReturnType<typeof runAttempt>>,
+    options: { clearSessionOnRetry: boolean },
+  ): Promise<AdapterExecutionResult> => {
+    if (
+      !attempt.proc.timedOut &&
+      (attempt.proc.exitCode ?? 0) !== 0 &&
+      isCodexTransientServerError(attempt.proc.stdout, attempt.rawStderr)
+    ) {
+      await onLog(
+        "stderr",
+        "[paperclip] Codex hit a transient upstream server error; retrying once with a fresh session.\n",
+      );
+      const retry = await runAttempt(null);
+      return toResult(retry, options.clearSessionOnRetry);
+    }
+    return toResult(attempt, options.clearSessionOnRetry);
+  };
+
   const initial = await runAttempt(sessionId);
   if (
     sessionId &&
@@ -579,8 +598,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[paperclip] Codex resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
     );
     const retry = await runAttempt(null);
-    return toResult(retry, true);
+    return maybeRetryTransientServerError(retry, { clearSessionOnRetry: true });
   }
 
-  return toResult(initial);
+  return maybeRetryTransientServerError(initial, { clearSessionOnRetry: false });
 }

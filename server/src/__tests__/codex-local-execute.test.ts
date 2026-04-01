@@ -37,6 +37,29 @@ console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, c
   await fs.chmod(commandPath, 0o755);
 }
 
+async function writeFlakyCodexCommand(commandPath: string, attemptsPath: string): Promise<void> {
+  const script = `#!/usr/bin/env node
+const fs = require("node:fs");
+const attemptsPath = process.env.PAPERCLIP_TEST_ATTEMPTS_PATH;
+const attempt = attemptsPath && fs.existsSync(attemptsPath)
+  ? Number.parseInt(fs.readFileSync(attemptsPath, "utf8"), 10) || 0
+  : 0;
+const nextAttempt = attempt + 1;
+if (attemptsPath) {
+  fs.writeFileSync(attemptsPath, String(nextAttempt), "utf8");
+}
+if (nextAttempt === 1) {
+  console.error("2026-04-01T03:32:01.115387Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses");
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: "thread.started", thread_id: "codex-session-retry" }));
+console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hello after retry" } }));
+console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 } }));
+`;
+  await fs.writeFile(commandPath, script, "utf8");
+  await fs.chmod(commandPath, 0o755);
+}
+
 type CapturePayload = {
   argv: string[];
   prompt: string;
@@ -201,7 +224,7 @@ describe("codex execute", () => {
     const paperclipHome = path.join(root, "paperclip-home");
     await fs.mkdir(workspace, { recursive: true });
     await fs.mkdir(sharedCodexHome, { recursive: true });
-    await fs.writeFile(path.join(sharedCodexHome, "auth.json"), '{"token":"shared"}\n', "utf8");
+    await fs.writeFile(path.join(sharedCodexHome, "auth.json"), '{"token": "***"}\n', "utf8");
     await writeFakeCodexCommand(commandPath);
 
     const previousHome = process.env.HOME;
@@ -262,6 +285,61 @@ describe("codex execute", () => {
       else process.env.PAPERCLIP_IN_WORKTREE = previousPaperclipInWorktree;
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previousCodexHome;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retries once when codex hits a transient websocket 500 error", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-retry-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const attemptsPath = path.join(root, "attempts.txt");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFlakyCodexCommand(commandPath, attemptsPath);
+
+    try {
+      const logs: LogEntry[] = [];
+      const result = await execute({
+        runId: "run-3",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: {
+            PAPERCLIP_TEST_ATTEMPTS_PATH: attemptsPath,
+          },
+          promptTemplate: "Follow the paperclip heartbeat.",
+        },
+        context: {},
+        authToken: "run-jwt-token",
+        onLog: async (stream, chunk) => {
+          logs.push({ stream, chunk });
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+      expect(result.summary).toBe("hello after retry");
+      expect(await fs.readFile(attemptsPath, "utf8")).toBe("2");
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          stream: "stderr",
+          chunk: expect.stringContaining("transient upstream server error; retrying once"),
+        }),
+      );
+    } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
