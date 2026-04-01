@@ -63,6 +63,7 @@ type EmbeddedPostgresCtor = new (opts: {
 
 const tempPaths: string[] = [];
 const runningInstances: EmbeddedPostgresInstance[] = [];
+const openDbClients: Array<{ end(options?: { timeout?: number }): Promise<void> }> = [];
 
 async function getEmbeddedPostgresCtor(): Promise<EmbeddedPostgresCtor> {
   const mod = await import("embedded-postgres");
@@ -113,6 +114,14 @@ async function createTempDatabase(): Promise<string> {
   return `postgres://paperclip:paperclip@127.0.0.1:${port}/paperclip`;
 }
 
+function registerDbClient(db: ReturnType<typeof createDb>) {
+  const client = (db as ReturnType<typeof createDb> & {
+    $client?: { end(options?: { timeout?: number }): Promise<void> };
+  }).$client;
+  if (client) openDbClients.push(client);
+  return db;
+}
+
 async function waitForRunTerminalState(db: ReturnType<typeof createDb>, runId: string) {
   for (let i = 0; i < 100; i += 1) {
     const run = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, runId)).then((rows) => rows[0] ?? null);
@@ -135,6 +144,12 @@ afterEach(async () => {
   adapterMocks.execute.mockReset();
   adapterMocks.getServerAdapter.mockClear();
   adapterMocks.runningProcesses.clear();
+
+  while (openDbClients.length > 0) {
+    const client = openDbClients.pop();
+    if (!client) continue;
+    await client.end({ timeout: 0 }).catch(() => undefined);
+  }
 
   while (runningInstances.length > 0) {
     const instance = runningInstances.pop();
@@ -168,7 +183,7 @@ describe("heartbeat verification output ingestion", () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
-    const db = createDb(connectionString);
+    const db = registerDbClient(createDb(connectionString));
     const heartbeat = heartbeatService(db);
 
     const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
@@ -236,7 +251,7 @@ describe("heartbeat verification output ingestion", () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
-    const db = createDb(connectionString);
+    const db = registerDbClient(createDb(connectionString));
     const heartbeat = heartbeatService(db);
 
     const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
@@ -343,7 +358,7 @@ describe("heartbeat verification output ingestion", () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
-    const db = createDb(connectionString);
+    const db = registerDbClient(createDb(connectionString));
     const heartbeat = heartbeatService(db);
     const graph = issueRunGraphService(db);
 
@@ -464,7 +479,7 @@ describe("heartbeat verification output ingestion", () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
-    const db = createDb(connectionString);
+    const db = registerDbClient(createDb(connectionString));
     const heartbeat = heartbeatService(db);
 
     const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
@@ -563,7 +578,7 @@ describe("heartbeat verification output ingestion", () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
 
-    const db = createDb(connectionString);
+    const db = registerDbClient(createDb(connectionString));
     const heartbeat = heartbeatService(db);
     const graph = issueRunGraphService(db);
 
