@@ -17,6 +17,7 @@ COPY ui/package.json ui/
 COPY packages/shared/package.json packages/shared/
 COPY packages/db/package.json packages/db/
 COPY packages/adapter-utils/package.json packages/adapter-utils/
+COPY packages/plugins/sdk/package.json packages/plugins/sdk/
 COPY packages/adapters/claude-local/package.json packages/adapters/claude-local/
 COPY packages/adapters/codex-local/package.json packages/adapters/codex-local/
 COPY packages/adapters/cursor-local/package.json packages/adapters/cursor-local/
@@ -27,6 +28,15 @@ COPY packages/adapters/pi-local/package.json packages/adapters/pi-local/
 
 RUN pnpm install --frozen-lockfile
 
+FROM base AS runtime-tools
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ripgrep ffmpeg docker.io \
+  && rm -rf /var/lib/apt/lists/*
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
+  && python3 -m pip install --break-system-packages git+https://github.com/NousResearch/hermes-agent.git \
+  && mkdir -p /paperclip \
+  && chown node:node /paperclip
+
 FROM base AS build
 WORKDIR /app
 COPY --from=deps /app /app
@@ -35,12 +45,9 @@ RUN pnpm --filter @paperclipai/ui build
 RUN pnpm --filter @paperclipai/server build
 RUN test -f server/dist/index.js || (echo "ERROR: server build output missing" && exit 1)
 
-FROM base AS production
+FROM runtime-tools AS production
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai \
-  && mkdir -p /paperclip \
-  && chown node:node /paperclip
 
 ENV NODE_ENV=production \
   HOME=/paperclip \

@@ -62,6 +62,32 @@ export function resolveDefaultAgentWorkspaceDir(agentId: string): string {
   return path.resolve(resolvePaperclipInstanceRoot(), "workspaces", trimmed);
 }
 
+export function resolveCompanyHermesHomeDir(companyId: string): string {
+  const trimmed = companyId.trim();
+  if (!trimmed) {
+    throw new Error("Managed Hermes home path requires companyId.");
+  }
+  return path.resolve(
+    resolvePaperclipInstanceRoot(),
+    "companies",
+    sanitizeFriendlyPathSegment(trimmed, "company"),
+    "hermes-home",
+  );
+}
+
+export function resolveHermesRuntimeCacheRoot(): string {
+  return path.resolve(resolvePaperclipInstanceRoot(), "runtime-cache", "hermes");
+}
+
+export function resolveHermesRuntimeChannelRoot(channel: string): string {
+  const normalized = sanitizeFriendlyPathSegment(channel, "stable");
+  return path.resolve(resolveHermesRuntimeCacheRoot(), "channels", normalized);
+}
+
+export function resolveHermesRuntimeChannelMetadataPath(channel: string): string {
+  return path.resolve(resolveHermesRuntimeChannelRoot(channel), "metadata.json");
+}
+
 function sanitizeFriendlyPathSegment(value: string | null | undefined, fallback = "_default"): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return fallback;

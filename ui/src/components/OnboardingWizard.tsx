@@ -59,12 +59,15 @@ type AdapterType =
   | "claude_local"
   | "codex_local"
   | "gemini_local"
+  | "hermes_local"
   | "opencode_local"
   | "pi_local"
   | "cursor"
   | "process"
   | "http"
   | "openclaw_gateway";
+
+const DEFAULT_HERMES_MODEL = "";
 
 const DEFAULT_TASK_DESCRIPTION = `Setup yourself as the CEO. Use the ceo persona found here: 
 
@@ -199,6 +202,7 @@ export function OnboardingWizard() {
     adapterType === "claude_local" ||
     adapterType === "codex_local" ||
     adapterType === "gemini_local" ||
+    adapterType === "hermes_local" ||
     adapterType === "opencode_local" ||
     adapterType === "cursor";
   const effectiveAdapterCommand =
@@ -207,6 +211,8 @@ export function OnboardingWizard() {
       ? "codex"
       : adapterType === "gemini_local"
         ? "gemini"
+      : adapterType === "hermes_local"
+        ? "hermes"
       : adapterType === "cursor"
       ? "agent"
       : adapterType === "opencode_local"
@@ -307,6 +313,8 @@ export function OnboardingWizard() {
           ? model || DEFAULT_CODEX_LOCAL_MODEL
           : adapterType === "gemini_local"
             ? model || DEFAULT_GEMINI_LOCAL_MODEL
+          : adapterType === "hermes_local"
+            ? model || DEFAULT_HERMES_MODEL
           : adapterType === "cursor"
           ? model || DEFAULT_CURSOR_LOCAL_MODEL
           : model,
@@ -730,6 +738,12 @@ export function OnboardingWizard() {
                           icon: Code,
                           desc: "Local Codex agent",
                           recommended: true
+                        },
+                        {
+                          value: "hermes_local" as const,
+                          label: "Hermes",
+                          icon: Bot,
+                          desc: "Local Hermes agent"
                         }
                       ].map((opt) => (
                         <button
@@ -745,8 +759,13 @@ export function OnboardingWizard() {
                             setAdapterType(nextType);
                             if (nextType === "codex_local" && !model) {
                               setModel(DEFAULT_CODEX_LOCAL_MODEL);
+                              return;
                             }
-                            if (nextType !== "codex_local") {
+                            if (nextType === "hermes_local" && !model) {
+                              setModel(DEFAULT_HERMES_MODEL);
+                              return;
+                            }
+                            if (nextType !== "codex_local" && nextType !== "hermes_local") {
                               setModel("");
                             }
                           }}
@@ -843,6 +862,10 @@ export function OnboardingWizard() {
                                 setModel(DEFAULT_CURSOR_LOCAL_MODEL);
                                 return;
                               }
+                              if (nextType === "hermes_local" && !model) {
+                                setModel(DEFAULT_HERMES_MODEL);
+                                return;
+                              }
                               if (nextType === "opencode_local") {
                                 if (!model.includes("/")) {
                                   setModel("");
@@ -870,6 +893,7 @@ export function OnboardingWizard() {
                   {(adapterType === "claude_local" ||
                     adapterType === "codex_local" ||
                     adapterType === "gemini_local" ||
+                    adapterType === "hermes_local" ||
                     adapterType === "opencode_local" ||
                     adapterType === "pi_local" ||
                     adapterType === "cursor") && (

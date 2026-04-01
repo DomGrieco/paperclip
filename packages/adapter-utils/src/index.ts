@@ -4,6 +4,8 @@ export type {
   UsageSummary,
   AdapterBillingType,
   AdapterRuntimeServiceReport,
+  AdapterVerificationVerdict,
+  AdapterArtifactReport,
   AdapterExecutionResult,
   AdapterInvocationMeta,
   AdapterExecutionContext,

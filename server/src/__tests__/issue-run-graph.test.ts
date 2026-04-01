@@ -12,6 +12,7 @@ import {
   ensurePostgresDatabase,
   issues,
   heartbeatRuns,
+  sharedContextPublications,
 } from "@paperclipai/db";
 import type { HeartbeatRun } from "@paperclipai/shared";
 import { issueRunGraphService } from "../services/issue-run-graph.js";
@@ -149,6 +150,7 @@ describe("run graph schema contract", () => {
     expect(run.runType).toBe("planner");
     expect(run.rootRunId).toBe(run.id);
     expect(run.verificationVerdict).toBeNull();
+    expect(run.runnerSnapshotJson).toBeNull();
   }, 20_000);
 
   it("creates a planner root and bounded worker children for an issue", async () => {
@@ -185,8 +187,207 @@ describe("run graph schema contract", () => {
     expect(root.runType).toBe("planner");
     expect(root.status).toBe("queued");
     expect(root.parentRunId).toBeNull();
+    expect(root.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmModelTier: "premium",
+      }),
+    );
     expect(children).toHaveLength(2);
     expect(children.every((child) => child.parentRunId === root.id)).toBe(true);
+  }, 20_000);
+
+  it("includes issue-scoped shared-context publications in the orchestration summary", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Surface shared context",
+      status: "todo",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    await db.insert(sharedContextPublications).values([
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: agent.id,
+        createdByRunId: null,
+        title: "Keep helper auth",
+        summary: "Worker runs should call the helper auth surface instead of raw localhost tokens.",
+        body: "The helper-first path keeps fleet execution aligned with Paperclip governance.",
+        tags: ["auth", "runtime"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "published",
+        freshness: "recent",
+        freshnessAt: new Date("2026-03-24T20:10:00.000Z"),
+        confidence: 92,
+        rank: 3,
+        provenance: { source: "test" },
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: agent.id,
+        createdByRunId: null,
+        title: "Needs review",
+        summary: null,
+        body: "Operator should confirm whether this gets promoted to company scope.",
+        tags: ["review"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "proposed",
+        freshness: "live",
+        freshnessAt: new Date("2026-03-24T20:20:00.000Z"),
+        confidence: null,
+        rank: 7,
+        provenance: { source: "test" },
+      },
+    ]);
+
+    const summary = await graph.getIssueSummary(issue.id);
+
+    expect(summary.issueSharedContextPublications).toEqual([
+      expect.objectContaining({
+        title: "Needs review",
+        status: "proposed",
+        freshness: "live",
+      }),
+      expect.objectContaining({
+        title: "Keep helper auth",
+        status: "published",
+        freshness: "recent",
+      }),
+    ]);
+  }, 20_000);
+
+  it("persists validated swarm plans on planner roots and bounded subtask packets on workers", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Planner",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Persist swarm packets",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, agent.id);
+    const plannerWithPlan = await graph.attachSwarmPlan(planner.id, {
+      version: "v1",
+      plannerRunId: planner.id,
+      generatedAt: "2026-03-24T18:55:00.000Z",
+      subtasks: [
+        {
+          id: "subtask-1",
+          kind: "research",
+          title: "Inspect logs",
+          goal: "Read the heartbeat logs and summarize failures.",
+          taskKey: "inspect-logs",
+          expectedArtifacts: [{ kind: "summary", required: true }],
+          acceptanceChecks: ["Summary cites the failing log path."],
+          recommendedModelTier: "cheap",
+        },
+        {
+          id: "subtask-2",
+          kind: "review",
+          title: "Review findings",
+          goal: "Review the gathered findings for completeness.",
+          taskKey: "review-findings",
+          expectedArtifacts: [{ kind: "comment", required: true }],
+          acceptanceChecks: ["Review covers both evidence sources."],
+          recommendedModelTier: "premium",
+        },
+      ],
+    });
+    const [worker] = await graph.spawnWorkers(planner.id, [
+      {
+        taskKey: "inspect-logs",
+        subtask: {
+          id: "subtask-1",
+          kind: "research",
+          title: "Inspect logs",
+          goal: "Read the heartbeat logs and summarize failures.",
+          taskKey: "inspect-logs",
+          expectedArtifacts: [{ kind: "summary", required: true }],
+          acceptanceChecks: ["Summary cites the failing log path."],
+          recommendedModelTier: "cheap",
+        },
+      },
+    ]);
+
+    expect(plannerWithPlan.contextSnapshot).toEqual(
+      expect.objectContaining({
+        swarmPlan: expect.objectContaining({
+          version: "v1",
+          plannerRunId: planner.id,
+        }),
+        swarmAdmission: expect.objectContaining({
+          admitted: true,
+          subtaskCount: 2,
+        }),
+      }),
+    );
+    expect(plannerWithPlan.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmAdmission: expect.objectContaining({
+          admitted: true,
+          subtaskCount: 2,
+        }),
+      }),
+    );
+    expect(worker.contextSnapshot).toEqual(
+      expect.objectContaining({
+        issueId: issue.id,
+        taskKey: "inspect-logs",
+        swarmModelTier: "cheap",
+        swarmSubtaskId: "subtask-1",
+        swarmPlanVersion: "v1",
+        swarmSubtask: expect.objectContaining({
+          id: "subtask-1",
+          recommendedModelTier: "cheap",
+        }),
+      }),
+    );
+    expect(worker.policySnapshotJson).toEqual(
+      expect.objectContaining({
+        swarmEnabled: true,
+        swarmModelTier: "cheap",
+        swarmSubtaskId: "subtask-1",
+        swarmSubtaskKind: "research",
+      }),
+    );
   }, 20_000);
 
   it("queues a repair worker when verification returns repair and retries remain", async () => {

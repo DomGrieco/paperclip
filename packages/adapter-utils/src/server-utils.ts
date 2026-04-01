@@ -130,6 +130,140 @@ export function redactEnvForLogs(env: Record<string, string>): Record<string, st
   return redacted;
 }
 
+
+export interface RuntimeBundleMaterializationResult {
+  root: string;
+  bundlePath: string;
+  instructionsPath: string;
+}
+
+
+function buildRuntimeProjectionInstructions(bundle: Record<string, unknown>): string {
+  const projection = parseObject(bundle.projection);
+  const runtime = asString(projection.runtime, "runtime");
+  const issue = parseObject(bundle.issue);
+  const policy = parseObject(bundle.policy);
+  const runner = parseObject(bundle.runner);
+  const verification = parseObject(bundle.verification);
+  const memory = parseObject(bundle.memory);
+  const swarm = parseObject(bundle.swarm);
+  const currentSubtask = parseObject(swarm.currentSubtask);
+  const workspaceGuard = parseObject(swarm.workspaceGuard);
+  const snippets = Array.isArray(memory.snippets)
+    ? memory.snippets.filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null)
+    : [];
+
+  const lines = [
+    `# Paperclip ${runtime} runtime projection`,
+    "",
+    "Start by reading instructions.md and bundle.json first, then consult shared-context.json when it is available.",
+    "Do not expand that initial read into policy.json, runner.json, or verification.json unless the assigned task explicitly requires it or bundle.json points you there.",
+    "Do not spend the run broadly spelunking the environment after those files are confirmed readable.",
+    "Prefer the narrowest path that completes the assigned work and leaves reviewable evidence.",
+    "",
+    "## Issue",
+    `- id: ${asString(issue.id, "unknown")}`,
+    `- identifier: ${asString(issue.identifier, "unknown")}`,
+    `- title: ${asString(issue.title, "unknown")}`,
+    `- status: ${asString(issue.status, "unknown")}`,
+    "",
+    "## Policy",
+    `- tddMode: ${asString(policy.tddMode, "required")}`,
+    `- evidencePolicy: ${asString(policy.evidencePolicy, "unknown")}`,
+    `- maxRepairAttempts: ${String(policy.maxRepairAttempts ?? "unknown")}`,
+    `- requiresHumanArtifacts: ${String(policy.requiresHumanArtifacts ?? false)}`,
+    "",
+    "## Runner",
+    `- target: ${asString(runner.target, "unknown")}`,
+    `- browserCapable: ${String(runner.browserCapable ?? false)}`,
+    `- sandboxed: ${String(runner.sandboxed ?? false)}`,
+    "",
+    "## Verification",
+    `- required: ${String(verification.required ?? true)}`,
+    `- requiresEvaluatorSummary: ${String(verification.requiresEvaluatorSummary ?? true)}`,
+    `- requiresArtifacts: ${String(verification.requiresArtifacts ?? false)}`,
+    "",
+    "## Swarm workspace guard",
+    `- subtaskId: ${asString(currentSubtask.id, "none")}`,
+    `- kind: ${asString(currentSubtask.kind, "none")}`,
+    `- ownershipMode: ${asString(currentSubtask.ownershipMode, "none")}`,
+    `- enforcedMode: ${asString(workspaceGuard.enforcedMode, "unknown")}`,
+    `- allowedPaths: ${asStringArray(currentSubtask.allowedPaths).join(", ") || "none"}`,
+    `- forbiddenPaths: ${asStringArray(currentSubtask.forbiddenPaths).join(", ") || "none"}`,
+    `- warnings: ${asStringArray(workspaceGuard.warnings).join(" | ") || "none"}`,
+    `- errors: ${asStringArray(workspaceGuard.errors).join(" | ") || "none"}`,
+    "Stay inside allowedPaths when editing code. Treat forbiddenPaths as off-limits. If ownershipMode is read_only, do not modify those files.",
+    "",
+    "## Memory recall",
+  ];
+
+  if (snippets.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const snippet of snippets.slice(0, 8)) {
+      lines.push(
+        `- [${asString(snippet.scope, "unknown")}] ${asString(snippet.source, "unknown")}: ${asString(snippet.content, "")}`,
+      );
+    }
+  }
+
+  lines.push("", "## Operator note", "Use these files as the Paperclip control-plane source of truth for this run.");
+  return lines.join("\n") + "\n";
+}
+
+export async function materializeRuntimeBundleWorkspace(input: {
+  cwd: string;
+  materializationRoot?: string | null;
+  runtimeBundle: unknown;
+}): Promise<RuntimeBundleMaterializationResult | null> {
+  if (!input.runtimeBundle || typeof input.runtimeBundle !== "object" || Array.isArray(input.runtimeBundle)) {
+    return null;
+  }
+
+  const relativeRoot = (input.materializationRoot ?? ".paperclip/runtime").trim() || ".paperclip/runtime";
+  const root = path.resolve(input.cwd, relativeRoot);
+  await fs.mkdir(root, { recursive: true });
+
+  const bundle = input.runtimeBundle as Record<string, unknown>;
+  const runtime = asString(parseObject(bundle.projection).runtime, "runtime");
+  const instructionsPath = path.join(root, "instructions.md");
+  const runtimeInstructionsPath = path.join(root, runtime, "instructions.md");
+  await fs.mkdir(path.dirname(runtimeInstructionsPath), { recursive: true });
+
+  const files: Array<[string, unknown]> = [
+    ["bundle.json", bundle],
+    ["policy.json", parseObject(bundle.policy)],
+    ["memory.json", parseObject(bundle.memory)],
+    ["runner.json", parseObject(bundle.runner)],
+    ["run.json", parseObject(bundle.run)],
+    ["verification.json", parseObject(bundle.verification)],
+    ["swarm.json", parseObject(bundle.swarm)],
+    ["issue.json", parseObject(bundle.issue)],
+    ["project.json", parseObject(bundle.project)],
+    ["agent.json", parseObject(bundle.agent)],
+    ["company.json", parseObject(bundle.company)],
+    ["projection.json", parseObject(bundle.projection)],
+  ];
+
+  await Promise.all([
+    ...files.map(([name, value]) =>
+      fs.writeFile(
+        path.join(root, name),
+        JSON.stringify(value ?? null, null, 2) + "\n",
+        "utf8",
+      ),
+    ),
+    fs.writeFile(instructionsPath, buildRuntimeProjectionInstructions(bundle), "utf8"),
+    fs.writeFile(runtimeInstructionsPath, buildRuntimeProjectionInstructions(bundle), "utf8"),
+  ]);
+
+  return {
+    root,
+    bundlePath: path.join(root, "bundle.json"),
+    instructionsPath,
+  };
+}
+
 export function buildPaperclipEnv(agent: { id: string; companyId: string }): Record<string, string> {
   const resolveHostForUrl = (rawHost: string): string => {
     const host = rawHost.trim();

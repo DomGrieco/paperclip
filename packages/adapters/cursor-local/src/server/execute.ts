@@ -11,6 +11,7 @@ import {
   buildPaperclipEnv,
   redactEnvForLogs,
   ensureAbsoluteDirectory,
+  materializeRuntimeBundleWorkspace,
   ensureCommandResolvable,
   ensurePaperclipSkillSymlink,
   ensurePathInEnv,
@@ -80,13 +81,18 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
     .filter((key) => key.startsWith("PAPERCLIP_"))
     .sort();
   if (paperclipKeys.length === 0) return "";
-  return [
+  const runtimeRoot = env.PAPERCLIP_RUNTIME_ROOT?.trim() ?? "";
+  const instructionsPath = env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH?.trim() ?? "";
+  const lines = [
     "Paperclip runtime note:",
     `The following PAPERCLIP_* environment variables are available in this run: ${paperclipKeys.join(", ")}`,
     "Do not assume these variables are missing without checking your shell environment.",
-    "",
-    "",
-  ].join("\n");
+  ];
+  if (runtimeRoot && instructionsPath) {
+    lines.push(`Paperclip also materialized runtime files in ${runtimeRoot}. Start by reading ${instructionsPath}.`);
+  }
+  lines.push("", "");
+  return lines.join("\n");
 }
 
 function cursorSkillsHome(): string {
@@ -182,6 +188,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     defaultCwd: process.cwd(),
   });
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
+  const runtimeBundleMaterialization = await materializeRuntimeBundleWorkspace({
+    cwd,
+    materializationRoot:
+      typeof context.paperclipRuntimeProjection === "object" && context.paperclipRuntimeProjection !== null && !Array.isArray(context.paperclipRuntimeProjection)
+        ? asString((context.paperclipRuntimeProjection as Record<string, unknown>).materializationRoot, ".paperclip/runtime")
+        : ".paperclip/runtime",
+    runtimeBundle: context.paperclipRuntimeBundle,
+  });
   await ensureCursorSkillsInjected(onLog);
 
   const envConfig = parseObject(config.env);
@@ -189,6 +203,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
   const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
   env.PAPERCLIP_RUN_ID = runId;
+  if (runtimeBundleMaterialization) {
+    env.PAPERCLIP_RUNTIME_ROOT = runtimeBundleMaterialization.root;
+    env.PAPERCLIP_RUNTIME_BUNDLE_PATH = runtimeBundleMaterialization.bundlePath;
+    env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH = runtimeBundleMaterialization.instructionsPath;
+  }
   const wakeTaskId =
     (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
     (typeof context.issueId === "string" && context.issueId.trim().length > 0 && context.issueId.trim()) ||

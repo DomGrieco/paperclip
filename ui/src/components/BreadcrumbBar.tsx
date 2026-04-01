@@ -1,5 +1,5 @@
 import { Link } from "@/lib/router";
-import { Menu } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useSidebar } from "../context/SidebarContext";
 import { useCompany } from "../context/CompanyContext";
@@ -32,7 +32,7 @@ function GlobalToolbarPlugins({ context }: { context: GlobalToolbarContext }) {
 
 export function BreadcrumbBar() {
   const { breadcrumbs } = useBreadcrumbs();
-  const { toggleSidebar, isMobile } = useSidebar();
+  const { sidebarOpen, toggleSidebar } = useSidebar();
   const { selectedCompanyId, selectedCompany } = useCompany();
 
   const globalToolbarSlotContext = useMemo(
@@ -53,15 +53,16 @@ export function BreadcrumbBar() {
     );
   }
 
-  const menuButton = isMobile && (
+  const sidebarButton = (
     <Button
       variant="ghost"
       size="icon-sm"
       className="mr-2 shrink-0"
       onClick={toggleSidebar}
-      aria-label="Open sidebar"
+      aria-label={sidebarOpen ? "Collapse navigation" : "Expand navigation"}
+      title={sidebarOpen ? "Collapse navigation" : "Expand navigation"}
     >
-      <Menu className="h-5 w-5" />
+      {sidebarOpen ? <PanelLeftClose className="h-4.5 w-4.5" /> : <PanelLeftOpen className="h-4.5 w-4.5" />}
     </Button>
   );
 
@@ -69,7 +70,7 @@ export function BreadcrumbBar() {
   if (breadcrumbs.length === 1) {
     return (
       <div className="border-b border-border px-4 md:px-6 h-12 shrink-0 flex items-center">
-        {menuButton}
+        {sidebarButton}
         <div className="min-w-0 overflow-hidden flex-1">
           <h1 className="text-sm font-semibold uppercase tracking-wider truncate">
             {breadcrumbs[0].label}
@@ -83,7 +84,7 @@ export function BreadcrumbBar() {
   // Multiple breadcrumbs = breadcrumb trail
   return (
     <div className="border-b border-border px-4 md:px-6 h-12 shrink-0 flex items-center">
-      {menuButton}
+      {sidebarButton}
       <div className="min-w-0 overflow-hidden flex-1">
         <Breadcrumb className="min-w-0 overflow-hidden">
           <BreadcrumbList className="flex-nowrap">

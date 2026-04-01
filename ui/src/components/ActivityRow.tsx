@@ -25,6 +25,8 @@ const ACTION_VERBS: Record<string, string> = {
   "agent.key_created": "created API key for",
   "agent.budget_updated": "updated budget for",
   "agent.runtime_session_reset": "reset session for",
+  "heartbeat.requested": "requested heartbeat for",
+  "heartbeat.started": "started heartbeat for",
   "heartbeat.invoked": "invoked heartbeat for",
   "heartbeat.cancelled": "cancelled heartbeat for",
   "approval.created": "requested approval",

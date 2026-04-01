@@ -106,6 +106,28 @@ export {
 } from "./work-product.js";
 
 export {
+  createSharedContextPublicationSchema,
+  updateSharedContextPublicationSchema,
+  sharedContextVisibilitySchema,
+  sharedContextStatusSchema,
+  sharedContextFreshnessSchema,
+  type CreateSharedContextPublication,
+  type UpdateSharedContextPublication,
+} from "./shared-context.js";
+
+export {
+  swarmSubtaskKindSchema,
+  swarmArtifactKindSchema,
+  swarmModelTierSchema,
+  swarmPathOwnershipModeSchema,
+  swarmArtifactRequirementSchema,
+  swarmSubtaskSchema,
+  swarmPlanSchema,
+  type SwarmSubtaskInput,
+  type SwarmPlanInput,
+} from "./orchestration.js";
+
+export {
   updateExecutionWorkspaceSchema,
   executionWorkspaceStatusSchema,
   type UpdateExecutionWorkspace,

@@ -35,6 +35,7 @@ services:
 
   server:
     build: .
+    user: root
     ports:
       - "3100:3100"
     environment:
@@ -45,8 +46,53 @@ services:
       PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
       PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
       BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
+      PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
+      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server-1:3100"
+      PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
     volumes:
       - paperclip-data:/paperclip
+      - ${HOME}/.hermes:/paperclip/shared/hermes-home-source:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker:/usr/local/bin/docker:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  server-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime-tools
+    working_dir: /workspace
+    command: ["sh", "-lc", "pnpm dev --tailscale-auth"]
+    environment:
+      CI: "1"
+      HOME: /paperclip
+      npm_config_store_dir: /pnpm/store
+      DATABASE_URL: postgres://paperclip:paperclip@db:5432/paperclip
+      PORT: "3100"
+      PAPERCLIP_HOME: /paperclip
+      PAPERCLIP_INSTANCE_ID: default
+      PAPERCLIP_CONFIG: /paperclip/instances/default/config.json
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+      PAPERCLIP_PUBLIC_URL: "${PAPERCLIP_PUBLIC_URL:-http://localhost:3100}"
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET:-paperclip-local-dev-secret}"
+      PAPERCLIP_HERMES_CONTAINER_LAUNCHER_ENABLED: "true"
+      PAPERCLIP_HERMES_CONTAINER_API_URL: "http://paperclip-server-dev-1:3100"
+      PAPERCLIP_HERMES_CONTAINER_FALLBACK_IMAGE: "paperclip-server:latest"
+    user: root
+    ports:
+      - "3100:3100"
+    volumes:
+      - .:/workspace
+      - paperclip-node-modules:/workspace/node_modules
+      - paperclip-pnpm-store:/pnpm/store
+      - paperclip-data:/paperclip
+      - ${HOME}/.hermes:/paperclip/shared/hermes-home-source:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/local/bin/docker:/usr/local/bin/docker:ro
     depends_on:
       db:
         condition: service_healthy

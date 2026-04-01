@@ -11,6 +11,7 @@ This spec defines how Paperclip prepares execution context for coding runtimes.
 
 - `doc/spec/feature-1-hierarchical-orchestration.md` defines when runs are created and how they progress.
 - This document defines what a run receives: resolved policy, runtime files, memory recall, secrets handling, and tool-specific projections.
+- `doc/spec/hermes-fleet-control-plane.md` defines how these runtime-surface concepts apply to a fleet of specialized Hermes workers with isolated homes, shared-context governance, and runner-plane execution.
 
 ## 2. Supported Runtime Targets
 
@@ -19,10 +20,17 @@ The first-class runtime targets for the new architecture are:
 - `codex`
 - `cursor`
 - `opencode`
+- `hermes`
 - `pi` (planned long-term canonical worker harness)
 
 `claude` support is legacy/non-priority.
 It may remain for compatibility, but it must not shape the architecture, file layout, or abstraction boundaries.
+
+`hermes` is the first-class runtime target for long-lived specialist workers that need:
+- native tools
+- local memory and skills
+- session continuity across heartbeats
+- controlled shared-context recall packets from Paperclip
 
 ## 3. Source Of Truth And Resolution Model
 
@@ -95,6 +103,7 @@ Examples:
 - `codex`: skills, prompt/instructions, hook-compatible files, environment variables, API access
 - `cursor`: workspace-facing rule and context projections aligned with Cursor conventions
 - `opencode`: runtime-facing rules/hooks/context in the locations the tool expects
+- `hermes`: Paperclip-governed runtime bundle, recall packet, env contract, and workspace bindings projected into a Hermes-compatible execution surface
 - `pi`: future native projection aligned with Pi's session and tool surface
 
 The projection layer exists so Paperclip can remain consistent internally while still meeting each runtime where it actually works.
@@ -143,6 +152,7 @@ Default rule:
 
 - static runtime context goes into the bundle
 - sensitive values go through env injection, runner-side mounts, or other scoped delivery
+- bootstrap/import sources should be consumed during runtime preparation and omitted from the steady-state worker contract once equivalent managed state has been materialized
 
 This keeps workspaces useful to coding agents without turning them into uncontrolled secret dumps.
 

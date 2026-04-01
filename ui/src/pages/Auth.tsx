@@ -6,6 +6,7 @@ import { queryKeys } from "../lib/queryKeys";
 import { Button } from "@/components/ui/button";
 import { AsciiArtAnimation } from "@/components/AsciiArtAnimation";
 import { Sparkles } from "lucide-react";
+import { getAuthContextNotice } from "@/lib/authContext";
 
 type AuthMode = "sign_in" | "sign_up";
 
@@ -20,6 +21,7 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null);
 
   const nextPath = useMemo(() => searchParams.get("next") || "/", [searchParams]);
+  const contextNotice = useMemo(() => getAuthContextNotice(nextPath), [nextPath]);
   const { data: session, isLoading: isSessionLoading } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
@@ -86,6 +88,13 @@ export function AuthPage() {
               ? "Use your email and password to access this instance."
               : "Create an account for this instance. Email confirmation is not required in v1."}
           </p>
+
+          {contextNotice && (
+            <div className="mt-4 rounded-lg border border-border bg-muted/40 px-4 py-3">
+              <p className="text-sm font-medium text-foreground">{contextNotice.title}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{contextNotice.message}</p>
+            </div>
+          )}
 
           <form
             className="mt-6 space-y-4"

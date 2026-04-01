@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+server_running() {
+  docker compose ps --status running -q server 2>/dev/null | grep -q .
+}
+
+server_dev_running() {
+  docker compose --profile dev ps --status running -q server-dev 2>/dev/null | grep -q .
+}
+
+ensure_port_available() {
+  if lsof -iTCP:3100 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+    echo "Port 3100 is already in use by a non-Paperclip process. Free it before starting hot-reload mode." >&2
+    lsof -iTCP:3100 -sTCP:LISTEN -n -P >&2 || true
+    exit 1
+  fi
+}
+
+prompt_takeover() {
+  if [ ! -t 0 ]; then
+    echo "Packaged Paperclip server is running on :3100. Re-run interactively to confirm takeover, or stop it first." >&2
+    exit 1
+  fi
+
+  printf '%s' 'Packaged Paperclip server is running on :3100. Stop it and start hot-reload mode with shared state? [y/N]: '
+  read -r answer
+  case "$answer" in
+    y|Y|yes|YES)
+      return 0
+      ;;
+    *)
+      echo "Aborted." >&2
+      exit 1
+      ;;
+  esac
+}
+
+if server_dev_running; then
+  echo "Hot-reload dev server is already running."
+  exit 0
+fi
+
+if server_running; then
+  prompt_takeover
+  docker compose stop server
+fi
+
+ensure_port_available
+
+docker compose run --rm app bin/setup-container
+docker compose --profile dev up -d --build db server-dev
+
+echo "Hot-reload Paperclip server is running at http://localhost:3100"

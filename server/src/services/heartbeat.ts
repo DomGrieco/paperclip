@@ -4,7 +4,8 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import type { BillingType, RuntimeBundle, RuntimeBundleTarget } from "@paperclipai/shared";
+import { swarmPlanSchema, swarmSubtaskSchema } from "@paperclipai/shared";
+import type { BillingType, RuntimeBundle, RuntimeBundleTarget, SwarmPlan, SwarmSubtask } from "@paperclipai/shared";
 import {
   agents,
   agentRuntimeState,
@@ -27,8 +28,9 @@ import { parseObject, asBoolean, asNumber, appendWithCap, MAX_EXCERPT_BYTES } fr
 import { costService } from "./costs.js";
 import { budgetService, type BudgetEnforcementScope } from "./budgets.js";
 import { secretService } from "./secrets.js";
-import { resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
+import { resolveCompanyHermesHomeDir, resolveDefaultAgentWorkspaceDir, resolveManagedProjectWorkspaceDir } from "../home-paths.js";
 import { summarizeHeartbeatRunResultJson } from "./heartbeat-run-summary.js";
+import { buildPaperclipSharedContextPacket } from "./shared-context.js";
 import {
   buildWorkspaceReadyComment,
   cleanupExecutionWorkspaceArtifacts,
@@ -43,9 +45,17 @@ import { executionWorkspaceService } from "./execution-workspaces.js";
 import { workspaceOperationService } from "./workspace-operations.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
 import { issueRunGraphService } from "./issue-run-graph.js";
+import { resolveSwarmAdapterConfigOverride } from "./swarm-policy.js";
+import { prepareHermesAdapterConfigForExecution } from "./hermes-runtime.js";
+import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
+import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
+import { injectHermesContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
+import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
+import { logActivity } from "./activity-log.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
+  deriveSwarmWorkspaceGuard,
   gateProjectExecutionWorkspacePolicy,
   parseIssueExecutionWorkspaceSettings,
   parseProjectExecutionWorkspacePolicy,
@@ -89,6 +99,7 @@ export function attachRuntimeBundleToContext(
     delete contextSnapshot.paperclipRuntimeProjection;
     delete contextSnapshot.paperclipPolicy;
     delete contextSnapshot.paperclipMemoryRecall;
+    delete contextSnapshot.paperclipSharedContextPacket;
     return contextSnapshot;
   }
 
@@ -96,6 +107,31 @@ export function attachRuntimeBundleToContext(
   contextSnapshot.paperclipRuntimeProjection = runtimeBundle.projection;
   contextSnapshot.paperclipPolicy = runtimeBundle.policy;
   contextSnapshot.paperclipMemoryRecall = runtimeBundle.memory;
+  return contextSnapshot;
+}
+
+export function attachPaperclipSharedContextPacketToContext(
+  contextSnapshot: Record<string, unknown>,
+  input: {
+    runtimeBundle: RuntimeBundle | null;
+    workspaceCwd: string | null;
+    runtimeBundleRoot: string | null;
+    runtimeInstructionsPath: string | null;
+    sharedContextPath: string | null;
+  },
+) {
+  if (!input.runtimeBundle || !input.workspaceCwd) {
+    delete contextSnapshot.paperclipSharedContextPacket;
+    return contextSnapshot;
+  }
+
+  contextSnapshot.paperclipSharedContextPacket = buildPaperclipSharedContextPacket({
+    runtimeBundle: input.runtimeBundle,
+    workspaceCwd: input.workspaceCwd,
+    runtimeBundleRoot: input.runtimeBundleRoot,
+    runtimeInstructionsPath: input.runtimeInstructionsPath,
+    sharedContextPath: input.sharedContextPath,
+  });
   return contextSnapshot;
 }
 
@@ -284,6 +320,34 @@ function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function readPlannerSwarmPlan(resultJson: Record<string, unknown> | null | undefined, plannerRunId: string): SwarmPlan | null {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) return null;
+
+  const orchestration = parseObject(resultJson.orchestration);
+  const candidates: unknown[] = [
+    resultJson.swarmPlan,
+    resultJson.plan,
+    orchestration?.swarmPlan,
+    resultJson,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = swarmPlanSchema.safeParse({
+      ...(typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) ? candidate : {}),
+      plannerRunId,
+    });
+    if (parsed.success) return parsed.data;
+  }
+
+  return null;
+}
+
+function readSwarmSubtaskFromContext(context: Record<string, unknown> | null | undefined): SwarmSubtask | null {
+  if (!context || typeof context !== "object" || Array.isArray(context)) return null;
+  const parsed = swarmSubtaskSchema.safeParse(context.swarmSubtask);
+  return parsed.success ? parsed.data : null;
+}
+
 function normalizeLedgerBillingType(value: unknown): BillingType {
   const raw = readNonEmptyString(value);
   switch (raw) {
@@ -343,6 +407,10 @@ async function resolveLedgerScopeForRun(
     issueId: issue?.id ?? null,
     projectId: issue?.projectId ?? contextProjectId,
   };
+}
+
+function readAdapterVerificationVerdict(value: unknown): "pass" | "repair" | "fail_terminal" | null {
+  return value === "pass" || value === "repair" || value === "fail_terminal" ? value : null;
 }
 
 function normalizeUsageTotals(usage: UsageSummary | null | undefined): UsageTotals | null {
@@ -1309,6 +1377,41 @@ export function heartbeatService(db: Db) {
       .where(eq(agentWakeupRequests.id, wakeupRequestId));
   }
 
+  async function logHeartbeatStartedActivity(run: typeof heartbeatRuns.$inferSelect) {
+    let actorType: "user" | "agent" | "system" = "system";
+    let actorId = "system";
+
+    if (run.wakeupRequestId) {
+      const wake = await db
+        .select({
+          requestedByActorType: agentWakeupRequests.requestedByActorType,
+          requestedByActorId: agentWakeupRequests.requestedByActorId,
+        })
+        .from(agentWakeupRequests)
+        .where(eq(agentWakeupRequests.id, run.wakeupRequestId))
+        .then((rows) => rows[0] ?? null);
+
+      if (wake?.requestedByActorType === "user" || wake?.requestedByActorType === "agent") {
+        actorType = wake.requestedByActorType;
+      }
+      if (typeof wake?.requestedByActorId === "string" && wake.requestedByActorId.trim().length > 0) {
+        actorId = wake.requestedByActorId.trim();
+      }
+    }
+
+    await logActivity(db, {
+      companyId: run.companyId,
+      actorType,
+      actorId,
+      agentId: actorType === "agent" ? actorId : null,
+      runId: run.id,
+      action: "heartbeat.started",
+      entityType: "heartbeat_run",
+      entityId: run.id,
+      details: { agentId: run.agentId },
+    });
+  }
+
   async function appendRunEvent(
     run: typeof heartbeatRuns.$inferSelect,
     seq: number,
@@ -1719,11 +1822,34 @@ export function heartbeatService(db: Db) {
       sessionCodec.deserialize(taskSessionForRun?.sessionParamsJson ?? null),
     );
     const config = parseObject(agent.adapterConfig);
-    const executionWorkspaceMode = resolveExecutionWorkspaceMode({
-      projectPolicy: projectExecutionWorkspacePolicy,
-      issueSettings: issueExecutionWorkspaceSettings,
-      legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
+    const currentSwarmSubtask = readSwarmSubtaskFromContext(context);
+    const swarmWorkspaceGuard = deriveSwarmWorkspaceGuard({
+      mode: resolveExecutionWorkspaceMode({
+        projectPolicy: projectExecutionWorkspacePolicy,
+        issueSettings: issueExecutionWorkspaceSettings,
+        legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
+      }),
+      subtask: currentSwarmSubtask,
     });
+    const executionWorkspaceMode = swarmWorkspaceGuard.enforcedMode;
+    const swarmModelTier =
+      typeof context.swarmModelTier === "string" && context.swarmModelTier.trim().length > 0
+        ? context.swarmModelTier.trim()
+        : null;
+    if (swarmWorkspaceGuard.warnings.length > 0 || swarmWorkspaceGuard.errors.length > 0) {
+      context.swarmWorkspaceGuard = {
+        enforcedMode: swarmWorkspaceGuard.enforcedMode,
+        warnings: swarmWorkspaceGuard.warnings,
+        errors: swarmWorkspaceGuard.errors,
+      };
+    }
+    if (swarmWorkspaceGuard.errors.length > 0) {
+      throw conflict("Swarm workspace ownership policy violation", {
+        errors: swarmWorkspaceGuard.errors,
+        warnings: swarmWorkspaceGuard.warnings,
+        swarmSubtaskId: currentSwarmSubtask?.id ?? null,
+      });
+    }
     const resolvedWorkspace = await resolveWorkspaceForRun(
       agent,
       context,
@@ -1736,13 +1862,20 @@ export function heartbeatService(db: Db) {
       issueSettings: issueExecutionWorkspaceSettings,
       mode: executionWorkspaceMode,
       legacyUseProjectWorkspace: issueAssigneeOverrides?.useProjectWorkspace ?? null,
+      swarmSubtask: currentSwarmSubtask,
     });
     const mergedConfig = issueAssigneeOverrides?.adapterConfig
       ? { ...workspaceManagedConfig, ...issueAssigneeOverrides.adapterConfig }
       : workspaceManagedConfig;
+    const swarmAdapterConfigOverride = swarmModelTier
+      ? resolveSwarmAdapterConfigOverride(agent.adapterType, swarmModelTier as "cheap" | "balanced" | "premium")
+      : null;
+    const executionConfigInput = swarmAdapterConfigOverride
+      ? { ...mergedConfig, ...swarmAdapterConfigOverride }
+      : mergedConfig;
     const { config: resolvedConfig, secretKeys } = await secretsSvc.resolveAdapterConfigForRuntime(
       agent.companyId,
-      mergedConfig,
+      executionConfigInput,
     );
     const issueRef = issueContext
       ? {
@@ -1755,8 +1888,12 @@ export function heartbeatService(db: Db) {
           executionWorkspacePreference: issueContext.executionWorkspacePreference,
         }
       : null;
+    const isSwarmWorkerRun = run.runType === "worker" && currentSwarmSubtask !== null;
+    const canReuseIssueWorkspace = !isSwarmWorkerRun || executionWorkspaceMode === "shared_workspace";
     const existingExecutionWorkspace =
-      issueRef?.executionWorkspaceId ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId) : null;
+      canReuseIssueWorkspace && issueRef?.executionWorkspaceId
+        ? await executionWorkspacesSvc.getById(issueRef.executionWorkspaceId)
+        : null;
     const workspaceOperationRecorder = workspaceOperationsSvc.createRecorder({
       companyId: agent.companyId,
       heartbeatRunId: run.id,
@@ -1783,6 +1920,7 @@ export function heartbeatService(db: Db) {
     const resolvedProjectId = executionWorkspace.projectId ?? issueRef?.projectId ?? executionProjectId ?? null;
     const resolvedProjectWorkspaceId = issueRef?.projectWorkspaceId ?? resolvedWorkspace.workspaceId ?? null;
     const shouldReuseExisting =
+      canReuseIssueWorkspace &&
       issueRef?.executionWorkspacePreference === "reuse_existing" &&
       existingExecutionWorkspace &&
       existingExecutionWorkspace.status !== "archived";
@@ -1888,7 +2026,12 @@ export function heartbeatService(db: Db) {
         cleanupReason: null,
       });
     }
-    if (issueId && persistedExecutionWorkspace && issueRef?.executionWorkspaceId !== persistedExecutionWorkspace.id) {
+    const shouldPersistIssueWorkspacePointer =
+      issueId &&
+      persistedExecutionWorkspace &&
+      issueRef?.executionWorkspaceId !== persistedExecutionWorkspace.id &&
+      (!isSwarmWorkerRun || executionWorkspaceMode === "shared_workspace");
+    if (shouldPersistIssueWorkspacePointer && persistedExecutionWorkspace) {
       await issuesSvc.update(issueId, {
         executionWorkspaceId: persistedExecutionWorkspace.id,
         ...(resolvedProjectWorkspaceId ? { projectWorkspaceId: resolvedProjectWorkspaceId } : {}),
@@ -1937,6 +2080,7 @@ export function heartbeatService(db: Db) {
       branchName: executionWorkspace.branchName,
       worktreePath: executionWorkspace.worktreePath,
       agentHome: resolveDefaultAgentWorkspaceDir(agent.id),
+      hermesHome: resolveCompanyHermesHomeDir(agent.companyId),
     };
     context.paperclipWorkspaces = resolvedWorkspace.workspaceHints;
     const runtimeServiceIntents = (() => {
@@ -1968,6 +2112,43 @@ export function heartbeatService(db: Db) {
           })
         : null;
     attachRuntimeBundleToContext(context, runtimeBundle);
+    const executionConfig =
+      agent.adapterType === "hermes_local"
+        ? await prepareHermesAdapterConfigForExecution({
+            config: resolvedConfig,
+            cwd: executionWorkspace.cwd,
+            companyId: agent.companyId,
+            managedHome: readNonEmptyString(parseObject(context.paperclipWorkspace).hermesHome) ?? null,
+            runtimeBundle,
+            authToken: createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id) ?? null,
+            persistedBootstrap: await hermesBootstrapProfileService(db).getStoredProfile(agent.companyId),
+          })
+        : resolvedConfig;
+    const hermesContainerPlan = agent.adapterType === "hermes_local"
+      ? buildHermesContainerLaunchPlan({
+          runId: run.id,
+          agentId: agent.id,
+          executionWorkspaceCwd: executionWorkspace.cwd,
+          executionConfig,
+          runtimeBundle,
+        })
+      : null;
+    if (hermesContainerPlan) {
+      context.paperclipHermesContainerPlan = hermesContainerPlan;
+    } else {
+      delete context.paperclipHermesContainerPlan;
+    }
+    const executionConfigWithRuntimeLaunch = injectHermesContainerLauncherService({
+      config: executionConfig,
+      plan: hermesContainerPlan,
+    });
+    attachPaperclipSharedContextPacketToContext(context, {
+      runtimeBundle,
+      workspaceCwd: executionWorkspace.cwd,
+      runtimeBundleRoot: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_ROOT) ?? null,
+      runtimeInstructionsPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH) ?? null,
+      sharedContextPath: readNonEmptyString(parseObject(executionConfigWithRuntimeLaunch.env).PAPERCLIP_SHARED_CONTEXT_PATH) ?? null,
+    });
     const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       taskSessionForRun?.sessionDisplayId ??
@@ -2030,7 +2211,11 @@ export function heartbeatService(db: Db) {
 
       const runningAgent = await db
         .update(agents)
-        .set({ status: "running", updatedAt: new Date() })
+        .set({
+          status: "running",
+          lastHeartbeatAt: startedAt,
+          updatedAt: new Date(),
+        })
         .where(eq(agents.id, agent.id))
         .returning()
         .then((rows) => rows[0] ?? null);
@@ -2042,10 +2227,14 @@ export function heartbeatService(db: Db) {
           payload: {
             agentId: runningAgent.id,
             status: runningAgent.status,
+            lastHeartbeatAt: runningAgent.lastHeartbeatAt
+              ? new Date(runningAgent.lastHeartbeatAt).toISOString()
+              : null,
             outcome: "running",
           },
         });
       }
+      await logHeartbeatStartedActivity(run);
 
       const currentRun = run;
       await appendRunEvent(currentRun, seq++, {
@@ -2107,7 +2296,7 @@ export function heartbeatService(db: Db) {
         await onLog(logEntry.stream, logEntry.chunk);
       }
       const adapterEnv = Object.fromEntries(
-        Object.entries(parseObject(resolvedConfig.env)).filter(
+        Object.entries(parseObject(executionConfig.env)).filter(
           (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string",
         ),
       );
@@ -2122,7 +2311,7 @@ export function heartbeatService(db: Db) {
         issue: issueRef,
         workspace: executionWorkspace,
         executionWorkspaceId: persistedExecutionWorkspace?.id ?? issueRef?.executionWorkspaceId ?? null,
-        config: resolvedConfig,
+        config: executionConfigWithRuntimeLaunch,
         adapterEnv,
         onLog,
       });
@@ -2185,11 +2374,21 @@ export function heartbeatService(db: Db) {
           "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
         );
       }
+      if (agent.adapterType === "hermes_local") {
+        await onLog(
+          "stdout",
+          `[paperclip] Hermes effective config: provider=${String(executionConfig.provider ?? "") || "<unset>"} model=${String(executionConfig.model ?? "") || "<unset>"} HERMES_HOME=${String(parseObject(executionConfig.env).HERMES_HOME ?? "") || "<unset>"}\n`,
+        );
+      }
+      const agentForExecution =
+        agent.adapterType === "hermes_local"
+          ? { ...agent, adapterConfig: executionConfig }
+          : agent;
       const adapterResult = await adapter.execute({
         runId: run.id,
-        agent,
+        agent: agentForExecution,
         runtime: runtimeForAdapter,
-        config: resolvedConfig,
+        config: executionConfig,
         context,
         onLog,
         onMeta: onAdapterMeta,
@@ -2210,14 +2409,14 @@ export function heartbeatService(db: Db) {
             reports: adapterResult.runtimeServices,
           })
         : [];
+      const observedRuntimeServices =
+        adapterManagedRuntimeServices.length > 0
+          ? [...runtimeServices, ...adapterManagedRuntimeServices]
+          : runtimeServices;
       if (adapterManagedRuntimeServices.length > 0) {
-        const combinedRuntimeServices = [
-          ...runtimeServices,
-          ...adapterManagedRuntimeServices,
-        ];
-        context.paperclipRuntimeServices = combinedRuntimeServices;
+        context.paperclipRuntimeServices = observedRuntimeServices;
         context.paperclipRuntimePrimaryUrl =
-          combinedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
+          observedRuntimeServices.find((service) => readNonEmptyString(service.url))?.url ?? null;
         await db
           .update(heartbeatRuns)
           .set({
@@ -2331,6 +2530,9 @@ export function heartbeatService(db: Db) {
         signal: adapterResult.signal,
         usageJson,
         resultJson: adapterResult.resultJson ?? null,
+        verificationVerdict:
+          run.runType === "verification" ? readAdapterVerificationVerdict(adapterResult.verificationVerdict) : null,
+        runnerSnapshotJson: (resolveObservedRunnerSnapshot({ planned: runtimeBundle?.runner ?? { target: "local_host", provider: "local_process", workspaceStrategyType: null, executionMode: null, browserCapable: false, sandboxed: false, isolationBoundary: "host_process" }, runtimeServices: observedRuntimeServices }) as unknown as Record<string, unknown> | null | undefined) ?? null,
         sessionIdAfter: nextSessionState.displayId ?? nextSessionState.legacySessionId,
         stdoutExcerpt,
         stderrExcerpt,
@@ -2344,15 +2546,38 @@ export function heartbeatService(db: Db) {
         error: adapterResult.errorMessage ?? null,
       });
 
+      if (adapterResult.artifacts?.length) {
+        await issueRunEvidence.persistReportedRunArtifacts({
+          companyId: agent.companyId,
+          runId: run.id,
+          issueId,
+          artifacts: adapterResult.artifacts,
+        });
+      }
+
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {
+        if (finalizedRun.runType === "planner" && outcome === "succeeded") {
+          const plannerSwarmPlan = readPlannerSwarmPlan(adapterResult.resultJson ?? null, finalizedRun.id);
+          if (plannerSwarmPlan) {
+            await issueRunGraph.attachSwarmPlan(finalizedRun.id, plannerSwarmPlan);
+            await issueRunGraph.materializePlannedWorkers(finalizedRun.id);
+          }
+        }
         if (finalizedRun.runType === "verification") {
           const verificationOutcome = await issueRunEvidence.syncVerificationOutcome(finalizedRun.id);
           if (verificationOutcome?.verificationVerdict === "repair") {
             await issueRunGraph.scheduleRepairFromVerification(finalizedRun.id);
           }
+          if (finalizedRun.rootRunId) {
+            await issueRunEvidence.synthesizePlannerReview(finalizedRun.rootRunId);
+          }
         }
-        await appendRunEvent(finalizedRun, seq++, {
+        if (finalizedRun.runType === "worker" && finalizedRun.rootRunId) {
+          await issueRunEvidence.synthesizePlannerReview(finalizedRun.rootRunId);
+        }
+        const runForEvent = await getRun(finalizedRun.id) ?? finalizedRun;
+        await appendRunEvent(runForEvent, seq++, {
           eventType: "lifecycle",
           stream: "system",
           level: outcome === "succeeded" ? "info" : "error",
@@ -2362,7 +2587,7 @@ export function heartbeatService(db: Db) {
             exitCode: adapterResult.exitCode,
           },
         });
-        await releaseIssueExecutionAndPromote(finalizedRun);
+        await releaseIssueExecutionAndPromote(runForEvent);
       }
 
       if (finalizedRun) {
@@ -2973,6 +3198,7 @@ export function heartbeatService(db: Db) {
             wakeupRequestId: wakeupRequest.id,
             contextSnapshot: enrichedContextSnapshot,
             sessionIdBefore: sessionBefore,
+            policySnapshotJson: plannerGraph?.root.policySnapshotJson ?? null,
             runType: plannerGraph?.runType ?? "worker",
             rootRunId: plannerGraph?.rootRunId ?? null,
             parentRunId: plannerGraph?.parentRunId ?? null,
@@ -3110,6 +3336,7 @@ export function heartbeatService(db: Db) {
         wakeupRequestId: wakeupRequest.id,
         contextSnapshot: enrichedContextSnapshot,
         sessionIdBefore: sessionBefore,
+        policySnapshotJson: plannerGraph?.root.policySnapshotJson ?? null,
         runType: plannerGraph?.runType ?? "worker",
         rootRunId: plannerGraph?.rootRunId ?? null,
         parentRunId: plannerGraph?.parentRunId ?? null,

@@ -20,6 +20,30 @@ const orchestration: IssueOrchestrationSummary = {
   evidencePolicy: "code_ci_evaluator_summary",
   evidencePolicySource: "company_default",
   evidenceBundle: null,
+  issueSharedContextPublications: [
+    {
+      id: "pub-1",
+      companyId: "company-1",
+      projectId: null,
+      issueId: "issue-1",
+      sourceAgentId: "agent-shared-1234",
+      createdByRunId: "run-shared-5678",
+      title: "API auth gotcha",
+      summary: "Use Paperclip helper auth headers instead of ad hoc curl tokens.",
+      body: "The runtime bundle already injects the helper auth surface for local fleet runs.",
+      tags: ["hermes", "auth"],
+      visibility: "issue",
+      audienceAgentIds: [],
+      status: "published",
+      freshness: "recent",
+      freshnessAt: "2026-03-24T19:30:00.000Z",
+      confidence: 0.91,
+      rank: 5,
+      provenance: { source: "runtime_bundle" },
+      createdAt: new Date("2026-03-24T19:20:00.000Z"),
+      updatedAt: new Date("2026-03-24T19:30:00.000Z"),
+    },
+  ],
   nodes: [
     {
       id: "run-plan",
@@ -30,6 +54,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 0,
       repairAttempt: 0,
       verificationVerdict: null,
+      runnerSnapshotJson: {
+        target: "local_host",
+        provider: "local_process",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: false,
+        sandboxed: false,
+        isolationBoundary: "host_process",
+      },
     },
     {
       id: "run-work",
@@ -40,6 +73,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 1,
       repairAttempt: 1,
       verificationVerdict: null,
+      runnerSnapshotJson: {
+        target: "hermes_container",
+        provider: "hermes_container",
+        workspaceStrategyType: "git_worktree",
+        executionMode: "isolated_workspace",
+        browserCapable: true,
+        sandboxed: true,
+        isolationBoundary: "container_process",
+      },
     },
     {
       id: "run-verify",
@@ -50,6 +92,15 @@ const orchestration: IssueOrchestrationSummary = {
       graphDepth: 1,
       repairAttempt: 0,
       verificationVerdict: "pass",
+      runnerSnapshotJson: {
+        target: "cloud_sandbox",
+        provider: "cloud_sandbox",
+        workspaceStrategyType: "cloud_sandbox",
+        executionMode: "isolated_workspace",
+        browserCapable: true,
+        sandboxed: true,
+        isolationBoundary: "cloud_sandbox",
+      },
     },
   ],
 };
@@ -109,8 +160,23 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Worker");
     expect(html).toContain("Verification");
     expect(html).toContain("Repair 1");
+    expect(html).toContain("Local Host");
+    expect(html).toContain("Hermes Container");
+    expect(html).toContain("Cloud Sandbox");
+    expect(html).toContain("Browser Capable");
+    expect(html).toContain("Isolated Workspace");
+    expect(html).toContain("Git Worktree");
+    expect(html).toContain("Container Process");
+    expect(html).toContain("Host Process");
     expect(html).toContain("/TST/agents/agent-plan/runs/run-plan");
     expect(html).toContain("/TST/agents/agent-verify/runs/run-verify");
+    expect(html).toContain("Shared Context");
+    expect(html).toContain("API auth gotcha");
+    expect(html).toContain("Issue Scope");
+    expect(html).toContain("Source Runtime Bundle");
+    expect(html).toContain("Freshness Recent");
+    expect(html).toContain("Confidence 91%");
+    expect(html).toContain("#hermes");
   });
 
   it("renders evaluator summary and artifact evidence details", () => {

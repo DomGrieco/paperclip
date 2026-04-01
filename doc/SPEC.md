@@ -61,6 +61,7 @@ Paperclip should adopt principles from these systems without inheriting their fu
 - `doc/spec/autonomous-enterprise-roadmap.md`
 - `doc/spec/feature-1-hierarchical-orchestration.md`
 - `doc/spec/agent-runtime-surface.md`
+- `doc/spec/hermes-fleet-control-plane.md`
 
 Where older draft sections in this document conflict with those subsystem specs, the newer subsystem specs control the next implementation direction.
 

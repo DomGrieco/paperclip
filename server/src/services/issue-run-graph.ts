@@ -1,16 +1,26 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRuns, issues } from "@paperclipai/db";
+import {
+  swarmPlanSchema,
+  swarmSubtaskSchema,
+} from "@paperclipai/shared";
 import type {
+  EvidencePolicy,
+  EvidencePolicySource,
   HeartbeatRunStatus,
   HeartbeatRunType,
   HeartbeatRun,
   IssueOrchestrationSummary,
   OrchestrationPolicySnapshot,
+  SwarmPlan,
+  SwarmSubtask,
   VerificationVerdict,
 } from "@paperclipai/shared";
 import { conflict, notFound } from "../errors.js";
 import { issueRunEvidenceService } from "./issue-run-evidence.js";
+import { sharedContextService } from "./shared-context-publications.js";
+import { buildSwarmPolicySnapshot, resolveSwarmModelTier, shouldSwarm } from "./swarm-policy.js";
 
 const MAX_WORKER_CHILDREN = 16;
 const DEFAULT_MAX_REPAIR_ATTEMPTS = 3;
@@ -23,6 +33,7 @@ type SpawnWorkerInput = {
   triggerDetail?: HeartbeatRun["triggerDetail"];
   contextSnapshot?: Record<string, unknown> | null;
   status?: HeartbeatRun["status"];
+  subtask?: SwarmSubtask | null;
 };
 
 type PlannerGraphMetadata = Pick<HeartbeatRun, "runType" | "rootRunId" | "parentRunId" | "graphDepth"> & {
@@ -52,6 +63,18 @@ function resolveMaxRepairAttempts(policy: OrchestrationPolicySnapshot | null | u
   return Math.max(0, Math.trunc(raw));
 }
 
+function readSwarmPlan(value: Record<string, unknown> | null | undefined): SwarmPlan | null {
+  const candidate = value?.swarmPlan;
+  const parsed = swarmPlanSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+function readSwarmSubtask(value: Record<string, unknown> | null | undefined): SwarmSubtask | null {
+  const candidate = value?.swarmSubtask;
+  const parsed = swarmSubtaskSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
 export function issueRunGraphService(db: Db) {
   const evidence = issueRunEvidenceService(db);
 
@@ -61,6 +84,8 @@ export function issueRunGraphService(db: Db) {
         id: issues.id,
         companyId: issues.companyId,
         assigneeAgentId: issues.assigneeAgentId,
+        evidencePolicy: issues.evidencePolicy,
+        evidencePolicySource: issues.evidencePolicySource,
       })
       .from(issues)
       .where(eq(issues.id, issueId))
@@ -111,10 +136,16 @@ export function issueRunGraphService(db: Db) {
         parentRunId: null,
         graphDepth: 0,
         repairAttempt: 0,
+        policySnapshotJson: buildSwarmPolicySnapshot({
+          evidencePolicy: issue.evidencePolicy as EvidencePolicy,
+          evidencePolicySource: issue.evidencePolicySource as EvidencePolicySource,
+          tier: "premium",
+        }),
         contextSnapshot: {
           issueId: issue.id,
           source: "issue.run_graph",
           role: "planner_root",
+          swarmModelTier: "premium",
         },
       })
       .returning();
@@ -129,6 +160,42 @@ export function issueRunGraphService(db: Db) {
       .returning();
 
     return root;
+  }
+
+  async function attachSwarmPlan(rootRunId: string, swarmPlan: SwarmPlan) {
+    const root = await getRun(rootRunId);
+    if (!root) throw notFound("Planner root not found");
+    if (root.runType !== "planner") throw conflict("Swarm plans can only attach to planner roots");
+
+    const normalizedPlan = swarmPlanSchema.parse({
+      ...swarmPlan,
+      plannerRunId: swarmPlan.plannerRunId ?? root.id,
+    });
+    const admission = shouldSwarm({
+      plan: normalizedPlan,
+      maxChildren: MAX_WORKER_CHILDREN,
+    });
+
+    const [updated] = await db
+      .update(heartbeatRuns)
+      .set({
+        contextSnapshot: {
+          ...(root.contextSnapshot ?? {}),
+          swarmPlan: normalizedPlan,
+          swarmAdmission: admission,
+        },
+        policySnapshotJson: {
+          ...((root.policySnapshotJson ?? {}) as OrchestrationPolicySnapshot),
+          swarmAdmission: admission,
+          swarmEnabled: admission.admitted,
+          swarmPlannerRunId: normalizedPlan.plannerRunId ?? root.id,
+        },
+        updatedAt: new Date(),
+      })
+      .where(eq(heartbeatRuns.id, root.id))
+      .returning();
+
+    return updated;
   }
 
   async function resolvePlannerGraph(issueId: string, agentId: string): Promise<PlannerGraphMetadata> {
@@ -148,6 +215,15 @@ export function issueRunGraphService(db: Db) {
     if (root.runType !== "planner") throw conflict("Worker fan-out requires a planner root");
 
     const issueId = readIssueId(root.contextSnapshot);
+    const swarmPlan = readSwarmPlan(root.contextSnapshot);
+    const issue = issueId ? await getIssue(issueId) : null;
+    const swarmAdmission = shouldSwarm({
+      plan: swarmPlan,
+      maxChildren: MAX_WORKER_CHILDREN,
+    });
+    if (swarmPlan && !swarmAdmission.admitted) {
+      throw conflict("Worker fan-out blocked by swarm admission policy", swarmAdmission);
+    }
     const existingChildren = await db
       .select({ count: sql<number>`count(*)` })
       .from(heartbeatRuns)
@@ -165,27 +241,85 @@ export function issueRunGraphService(db: Db) {
     const inserted = await db
       .insert(heartbeatRuns)
       .values(
-        workers.map((worker) => ({
-          companyId: root.companyId,
-          agentId: worker.agentId ?? root.agentId,
-          invocationSource: worker.invocationSource ?? "assignment",
-          triggerDetail: worker.triggerDetail ?? "system",
-          status: worker.status ?? "queued",
-          runType: "worker",
-          rootRunId: root.id,
-          parentRunId: root.id,
-          graphDepth: (root.graphDepth ?? 0) + 1,
-          repairAttempt: 0,
-          contextSnapshot: {
-            issueId,
-            ...(worker.contextSnapshot ?? {}),
-            ...(worker.taskKey ? { taskKey: worker.taskKey } : {}),
-          },
-        })),
+        workers.map((worker) => {
+          const normalizedSubtask = worker.subtask ? swarmSubtaskSchema.parse(worker.subtask) : null;
+          const swarmModelTier = normalizedSubtask ? resolveSwarmModelTier(normalizedSubtask) : "balanced";
+          return {
+            companyId: root.companyId,
+            agentId: worker.agentId ?? root.agentId,
+            invocationSource: worker.invocationSource ?? "assignment",
+            triggerDetail: worker.triggerDetail ?? "system",
+            status: worker.status ?? "queued",
+            runType: "worker",
+            rootRunId: root.id,
+            parentRunId: root.id,
+            graphDepth: (root.graphDepth ?? 0) + 1,
+            repairAttempt: 0,
+            policySnapshotJson: buildSwarmPolicySnapshot({
+              evidencePolicy: (issue?.evidencePolicy ?? "code_ci_evaluator_summary") as EvidencePolicy,
+              evidencePolicySource: (issue?.evidencePolicySource ?? "company_default") as EvidencePolicySource,
+              tier: swarmModelTier,
+              plannerRunId: swarmPlan?.plannerRunId ?? root.id,
+              subtask: normalizedSubtask,
+              admission: swarmAdmission,
+            }),
+            contextSnapshot: {
+              issueId,
+              ...(worker.contextSnapshot ?? {}),
+              ...(worker.taskKey ? { taskKey: worker.taskKey } : {}),
+              swarmModelTier,
+              ...(normalizedSubtask ? { swarmSubtask: normalizedSubtask } : {}),
+              ...(normalizedSubtask?.id ? { swarmSubtaskId: normalizedSubtask.id } : {}),
+              ...(swarmPlan ? { swarmPlanVersion: swarmPlan.version } : {}),
+            },
+          };
+        }),
       )
       .returning();
 
     return inserted;
+  }
+
+  async function materializePlannedWorkers(rootRunId: string) {
+    const root = await getRun(rootRunId);
+    if (!root) throw notFound("Planner root not found");
+    if (root.runType !== "planner") throw conflict("Planned worker materialization requires a planner root");
+
+    const swarmPlan = readSwarmPlan(root.contextSnapshot);
+    if (!swarmPlan) return [];
+
+    const existingChildren = await db
+      .select({
+        taskKey: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'taskKey'`,
+        swarmSubtaskId: sql<string | null>`${heartbeatRuns.contextSnapshot} ->> 'swarmSubtaskId'`,
+      })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.parentRunId, root.id));
+
+    const occupiedKeys = new Set<string>();
+    for (const child of existingChildren) {
+      if (typeof child.taskKey === "string" && child.taskKey.trim().length > 0) occupiedKeys.add(child.taskKey.trim());
+      if (typeof child.swarmSubtaskId === "string" && child.swarmSubtaskId.trim().length > 0) {
+        occupiedKeys.add(child.swarmSubtaskId.trim());
+      }
+    }
+
+    const pendingSubtasks = swarmPlan.subtasks.filter((subtask) => {
+      const taskKey = subtask.taskKey ?? subtask.id;
+      return !occupiedKeys.has(subtask.id) && !occupiedKeys.has(taskKey);
+    });
+    if (pendingSubtasks.length === 0) return [];
+
+    return spawnWorkers(
+      root.id,
+      pendingSubtasks.map((subtask) => ({
+        taskKey: subtask.taskKey,
+        subtask,
+        contextSnapshot: {
+          plannerRunId: root.id,
+        },
+      })),
+    );
   }
 
   async function scheduleRepairFromVerification(verificationRunId: string) {
@@ -250,6 +384,7 @@ export function issueRunGraphService(db: Db) {
   async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
     return db.transaction(async (tx) => {
       const scopedEvidence = issueRunEvidenceService(tx as unknown as Db);
+      const scopedSharedContext = sharedContextService(tx as unknown as Db);
       const issue = await tx
         .select({
           id: issues.id,
@@ -271,6 +406,8 @@ export function issueRunGraphService(db: Db) {
           graphDepth: heartbeatRuns.graphDepth,
           repairAttempt: heartbeatRuns.repairAttempt,
           verificationVerdict: heartbeatRuns.verificationVerdict,
+          runnerSnapshotJson: heartbeatRuns.runnerSnapshotJson,
+          artifactBundleJson: heartbeatRuns.artifactBundleJson,
         })
         .from(heartbeatRuns)
         .where(
@@ -282,6 +419,9 @@ export function issueRunGraphService(db: Db) {
         .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
 
       const evidenceBundle = await scopedEvidence.getIssueEvidenceBundle(issue.id);
+      const issueSharedContextPublications = await scopedSharedContext.list(issue.companyId, {
+        issueId: issue.id,
+      });
       const rootRunId =
         runs.find((run) => run.runType === "planner")?.id ??
         runs.find((run) => run.graphDepth === 0)?.id ??
@@ -294,6 +434,7 @@ export function issueRunGraphService(db: Db) {
         evidencePolicy: evidenceBundle.policy,
         evidencePolicySource: evidenceBundle.policySource,
         evidenceBundle,
+        issueSharedContextPublications,
         nodes: runs.map((run) => ({
           id: run.id,
           runType: asRunType(run.runType),
@@ -303,13 +444,17 @@ export function issueRunGraphService(db: Db) {
           graphDepth: run.graphDepth,
           repairAttempt: run.repairAttempt,
           verificationVerdict: asVerificationVerdict(run.verificationVerdict),
+          runnerSnapshotJson: (run.runnerSnapshotJson as IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]) ?? null,
+          artifactBundleJson: (run.artifactBundleJson as IssueOrchestrationSummary["nodes"][number]["artifactBundleJson"]) ?? null,
         })),
       };
     });
   }
 
   return {
+    attachSwarmPlan,
     getIssueSummary,
+    materializePlannedWorkers,
     resolvePlannerGraph,
     scheduleRepairFromVerification,
     spawnWorkers,

@@ -333,6 +333,105 @@ export function secretService(db: Db) {
       return { env: resolved, secretKeys };
     },
 
+    resolveSecretTextByName: async (
+      companyId: string,
+      name: string,
+      version: number | "latest" = "latest",
+    ): Promise<string | null> => {
+      const secret = await getByName(companyId, name);
+      if (!secret) return null;
+      return await resolveSecretValue(companyId, secret.id, version);
+    },
+
+    upsertTextSecretByName: async (
+      companyId: string,
+      input: {
+        name: string;
+        value: string;
+        description?: string | null;
+        provider?: SecretProvider;
+        externalRef?: string | null;
+      },
+      actor?: { userId?: string | null; agentId?: string | null },
+    ) => {
+      const existing = await getByName(companyId, input.name);
+      if (!existing) {
+        const provider = getSecretProvider(input.provider ?? "local_encrypted");
+        const prepared = await provider.createVersion({
+          value: input.value,
+          externalRef: input.externalRef ?? null,
+        });
+        return db.transaction(async (tx) => {
+          const secret = await tx
+            .insert(companySecrets)
+            .values({
+              companyId,
+              name: input.name,
+              provider: input.provider ?? "local_encrypted",
+              externalRef: prepared.externalRef,
+              latestVersion: 1,
+              description: input.description ?? null,
+              createdByAgentId: actor?.agentId ?? null,
+              createdByUserId: actor?.userId ?? null,
+            })
+            .returning()
+            .then((rows) => rows[0]);
+
+          await tx.insert(companySecretVersions).values({
+            secretId: secret.id,
+            version: 1,
+            material: prepared.material,
+            valueSha256: prepared.valueSha256,
+            createdByAgentId: actor?.agentId ?? null,
+            createdByUserId: actor?.userId ?? null,
+          });
+
+          return secret;
+        });
+      }
+
+      const provider = getSecretProvider(existing.provider as SecretProvider);
+      const nextVersion = existing.latestVersion + 1;
+      const prepared = await provider.createVersion({
+        value: input.value,
+        externalRef: input.externalRef ?? existing.externalRef ?? null,
+      });
+
+      return db.transaction(async (tx) => {
+        await tx.insert(companySecretVersions).values({
+          secretId: existing.id,
+          version: nextVersion,
+          material: prepared.material,
+          valueSha256: prepared.valueSha256,
+          createdByAgentId: actor?.agentId ?? null,
+          createdByUserId: actor?.userId ?? null,
+        });
+
+        const updated = await tx
+          .update(companySecrets)
+          .set({
+            name: input.name,
+            description: input.description === undefined ? existing.description : input.description,
+            externalRef: input.externalRef === undefined ? prepared.externalRef : input.externalRef,
+            latestVersion: nextVersion,
+            updatedAt: new Date(),
+          })
+          .where(eq(companySecrets.id, existing.id))
+          .returning()
+          .then((rows) => rows[0] ?? null);
+
+        if (!updated) throw notFound("Secret not found");
+        return updated;
+      });
+    },
+
+    removeByName: async (companyId: string, name: string) => {
+      const secret = await getByName(companyId, name);
+      if (!secret) return null;
+      await db.delete(companySecrets).where(eq(companySecrets.id, secret.id));
+      return secret;
+    },
+
     resolveAdapterConfigForRuntime: async (companyId: string, adapterConfig: Record<string, unknown>): Promise<{ config: Record<string, unknown>; secretKeys: Set<string> }> => {
       const resolved = { ...adapterConfig };
       const secretKeys = new Set<string>();

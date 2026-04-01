@@ -8,8 +8,10 @@ import type { AdapterRuntimeServiceReport } from "@paperclipai/adapter-utils";
 import type { Db } from "@paperclipai/db";
 import { workspaceRuntimeServices } from "@paperclipai/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import type { HermesContainerLaunchPlan } from "@paperclipai/shared";
 import { asNumber, asString, parseObject, renderTemplate } from "../adapters/utils.js";
 import { resolveHomeAwarePath } from "../home-paths.js";
+import { createAndStartHermesContainer, removeHermesContainer, resolveHermesContainerImage, stableHermesContainerRuntimeServiceId } from "./hermes-container-launcher.js";
 import type { WorkspaceOperationRecorder } from "./workspace-operations.js";
 
 export interface ExecutionWorkspaceInput {
@@ -59,7 +61,7 @@ export interface RuntimeServiceRef {
   cwd: string | null;
   port: number | null;
   url: string | null;
-  provider: "local_process" | "adapter_managed";
+  provider: "local_process" | "adapter_managed" | "hermes_container";
   providerRef: string | null;
   ownerAgentId: string | null;
   startedByRunId: string | null;
@@ -112,6 +114,7 @@ function stableRuntimeServiceId(input: {
   scopeId: string | null;
   serviceName: string;
   reportId: string | null;
+  provider: RuntimeServiceRef["provider"];
   providerRef: string | null;
   reuseKey: string | null;
 }) {
@@ -124,13 +127,14 @@ function stableRuntimeServiceId(input: {
         scopeType: input.scopeType,
         scopeId: input.scopeId,
         serviceName: input.serviceName,
+        provider: input.provider,
         providerRef: input.providerRef,
         reuseKey: input.reuseKey,
       }),
     )
     .digest("hex")
     .slice(0, 32);
-  return `${input.adapterType}-${digest}`;
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
 function toRuntimeServiceRef(record: RuntimeServiceRecord, overrides?: Partial<RuntimeServiceRef>): RuntimeServiceRef {
@@ -1036,6 +1040,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
     const serviceName = asString(report.serviceName, "").trim() || "service";
     const status = report.status ?? "running";
     const lifecycle = report.lifecycle ?? "ephemeral";
+    const provider = report.provider ?? "adapter_managed";
     const healthStatus =
       report.healthStatus ??
       (status === "running" ? "healthy" : status === "failed" ? "unhealthy" : "unknown");
@@ -1047,6 +1052,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
         scopeId,
         serviceName,
         reportId: report.id ?? null,
+        provider,
         providerRef: report.providerRef ?? null,
         reuseKey: report.reuseKey ?? null,
       }),
@@ -1065,7 +1071,7 @@ export function normalizeAdapterManagedRuntimeServices(input: {
       cwd: report.cwd ?? null,
       port: report.port ?? null,
       url: report.url ?? null,
-      provider: "adapter_managed",
+      provider,
       providerRef: report.providerRef ?? null,
       ownerAgentId: report.ownerAgentId ?? input.agent.id,
       startedByRunId: input.runId,
@@ -1077,6 +1083,74 @@ export function normalizeAdapterManagedRuntimeServices(input: {
       reused: false,
     };
   });
+}
+
+async function startHermesContainerRuntimeService(input: {
+  db?: Db;
+  runId: string;
+  agent: ExecutionWorkspaceAgentRef;
+  issue: ExecutionWorkspaceIssueRef | null;
+  workspace: RealizedExecutionWorkspace;
+  executionWorkspaceId?: string | null;
+  service: Record<string, unknown>;
+  onLog?: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
+  reuseKey: string | null;
+  scopeType: "project_workspace" | "execution_workspace" | "run" | "agent";
+  scopeId: string | null;
+}): Promise<RuntimeServiceRecord> {
+  const plan = parseObject(input.service.hermesContainerPlan) as unknown as HermesContainerLaunchPlan;
+  const serviceName = asString(input.service.name, "hermes-worker");
+  const preferredImage = asString(plan.image, "paperclip/hermes-worker:dev");
+  const image = await resolveHermesContainerImage(preferredImage);
+  const serviceId = stableHermesContainerRuntimeServiceId({
+    runId: input.runId,
+    serviceName,
+    image,
+  });
+  const containerId = await createAndStartHermesContainer({
+    runId: input.runId,
+    agentId: input.agent.id,
+    serviceId,
+    image,
+    plan,
+    workspaceCwd: input.workspace.cwd,
+  });
+  if (input.onLog) {
+    await input.onLog("stdout", `[service:${serviceName}] launched hermes_container ${containerId} using image ${image}\n`);
+  }
+  return {
+    id: serviceId,
+    companyId: input.agent.companyId,
+    projectId: input.workspace.projectId,
+    projectWorkspaceId: input.workspace.workspaceId,
+    executionWorkspaceId: input.executionWorkspaceId ?? null,
+    issueId: input.issue?.id ?? null,
+    serviceName,
+    status: "running",
+    lifecycle: "ephemeral",
+    scopeType: input.scopeType,
+    scopeId: input.scopeId,
+    reuseKey: input.reuseKey,
+    command: Array.isArray(plan.command) ? plan.command.join(" ") : null,
+    cwd: input.workspace.cwd,
+    port: null,
+    url: null,
+    provider: "hermes_container",
+    providerRef: containerId,
+    ownerAgentId: input.agent.id,
+    startedByRunId: input.runId,
+    lastUsedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    stoppedAt: null,
+    stopPolicy: parseObject(input.service.stopPolicy),
+    healthStatus: "healthy",
+    reused: false,
+    db: input.db,
+    child: null,
+    leaseRunIds: new Set([input.runId]),
+    idleTimer: null,
+    envFingerprint: createHash("sha256").update(stableStringify(plan.env ?? [])).digest("hex"),
+  };
 }
 
 async function startLocalRuntimeService(input: {
@@ -1211,7 +1285,9 @@ async function stopRuntimeService(serviceId: string) {
   record.status = "stopped";
   record.lastUsedAt = new Date().toISOString();
   record.stoppedAt = new Date().toISOString();
-  if (record.child && record.child.pid) {
+  if (record.provider === "hermes_container" && record.providerRef) {
+    await removeHermesContainer(record.providerRef);
+  } else if (record.child && record.child.pid) {
     terminateChildProcess(record.child);
   }
   runtimeServicesById.delete(serviceId);
@@ -1319,20 +1395,35 @@ export async function ensureRuntimeServicesForRun(input: {
         }
       }
 
-      const record = await startLocalRuntimeService({
-        db: input.db,
-        runId: input.runId,
-        agent: input.agent,
-        issue: input.issue,
-        workspace: input.workspace,
-        executionWorkspaceId: input.executionWorkspaceId,
-        adapterEnv: input.adapterEnv,
-        service,
-        onLog: input.onLog,
-        reuseKey,
-        scopeType,
-        scopeId,
-      });
+      const provider = asString(service.provider, "local_process");
+      const record = await (provider === "hermes_container"
+        ? startHermesContainerRuntimeService({
+            db: input.db,
+            runId: input.runId,
+            agent: input.agent,
+            issue: input.issue,
+            workspace: input.workspace,
+            executionWorkspaceId: input.executionWorkspaceId,
+            service,
+            onLog: input.onLog,
+            reuseKey,
+            scopeType,
+            scopeId,
+          })
+        : startLocalRuntimeService({
+            db: input.db,
+            runId: input.runId,
+            agent: input.agent,
+            issue: input.issue,
+            workspace: input.workspace,
+            executionWorkspaceId: input.executionWorkspaceId,
+            adapterEnv: input.adapterEnv,
+            service,
+            onLog: input.onLog,
+            reuseKey,
+            scopeType,
+            scopeId,
+          }));
       registerRuntimeService(input.db, record);
       await persistRuntimeServiceRecord(input.db, record);
       acquiredServiceIds.push(record.id);
@@ -1429,7 +1520,7 @@ export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
     .from(workspaceRuntimeServices)
     .where(
       and(
-        eq(workspaceRuntimeServices.provider, "local_process"),
+        inArray(workspaceRuntimeServices.provider, ["local_process", "hermes_container"]),
         inArray(workspaceRuntimeServices.status, ["starting", "running"]),
       ),
     );
@@ -1448,7 +1539,7 @@ export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
     })
     .where(
       and(
-        eq(workspaceRuntimeServices.provider, "local_process"),
+        inArray(workspaceRuntimeServices.provider, ["local_process", "hermes_container"]),
         inArray(workspaceRuntimeServices.status, ["starting", "running"]),
       ),
     );

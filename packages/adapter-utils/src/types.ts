@@ -55,10 +55,24 @@ export interface AdapterRuntimeServiceReport {
   cwd?: string | null;
   port?: number | null;
   url?: string | null;
+  provider?: "adapter_managed" | "hermes_container";
   providerRef?: string | null;
   ownerAgentId?: string | null;
   stopPolicy?: Record<string, unknown> | null;
   healthStatus?: "unknown" | "healthy" | "unhealthy";
+}
+
+export type AdapterVerificationVerdict = "pass" | "repair" | "fail_terminal";
+
+export interface AdapterArtifactReport {
+  issueId?: string | null;
+  artifactKind: string;
+  role?: string | null;
+  label?: string | null;
+  assetId?: string | null;
+  documentId?: string | null;
+  issueWorkProductId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface AdapterExecutionResult {
@@ -82,6 +96,8 @@ export interface AdapterExecutionResult {
   costUsd?: number | null;
   resultJson?: Record<string, unknown> | null;
   runtimeServices?: AdapterRuntimeServiceReport[];
+  artifacts?: AdapterArtifactReport[];
+  verificationVerdict?: AdapterVerificationVerdict | null;
   summary?: string | null;
   clearSession?: boolean;
   question?: {

@@ -1,5 +1,5 @@
-import type { IssueOrchestrationSummary } from "@paperclipai/shared";
-import { GitBranchPlus, ShieldCheck, Wrench } from "lucide-react";
+import type { IssueOrchestrationSummary, SharedContextPublication } from "@paperclipai/shared";
+import { BookMarked, GitBranchPlus, ShieldCheck, Wrench } from "lucide-react";
 import { StatusBadge } from "./StatusBadge";
 import { formatDateTime } from "../lib/utils";
 import { Link } from "../lib/router";
@@ -35,6 +35,171 @@ function evidencePolicyLabel(policy: IssueOrchestrationSummary["evidencePolicy"]
   }
 }
 
+function runnerTargetLabel(target: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["target"]) {
+  switch (target) {
+    case "local_host":
+      return "Local Host";
+    case "adapter_managed":
+      return "Adapter Managed";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    case "hermes_container":
+      return "Hermes Container";
+    default:
+      return humanize(target);
+  }
+}
+
+function executionModeLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["executionMode"] | null) {
+  switch (value) {
+    case "isolated_workspace":
+      return "Isolated Workspace";
+    case "shared_workspace":
+      return "Shared Workspace";
+    default:
+      return value ? humanize(value) : "Unknown";
+  }
+}
+
+function workspaceStrategyLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["workspaceStrategyType"] | null) {
+  switch (value) {
+    case "git_worktree":
+      return "Git Worktree";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    case "adapter_managed":
+      return "Adapter Managed";
+    default:
+      return value ? humanize(value) : "Unknown";
+  }
+}
+
+function isolationBoundaryLabel(value: NonNullable<IssueOrchestrationSummary["nodes"][number]["runnerSnapshotJson"]>["isolationBoundary"]) {
+  switch (value) {
+    case "host_process":
+      return "Host Process";
+    case "adapter_runtime":
+      return "Adapter Runtime";
+    case "container_process":
+      return "Container Process";
+    case "cloud_sandbox":
+      return "Cloud Sandbox";
+    default:
+      return humanize(value);
+  }
+}
+
+function visibilityLabel(value: SharedContextPublication["visibility"]) {
+  switch (value) {
+    case "issue":
+      return "Issue Scope";
+    case "project":
+      return "Project Scope";
+    case "company":
+      return "Company Scope";
+    case "agent_set":
+      return "Agent Set";
+    default:
+      return humanize(value);
+  }
+}
+
+function freshnessLabel(value: SharedContextPublication["freshness"]) {
+  switch (value) {
+    case "live":
+      return "Live";
+    case "recent":
+      return "Recent";
+    case "static":
+      return "Static";
+    default:
+      return humanize(value);
+  }
+}
+
+function publicationPreview(publication: SharedContextPublication) {
+  const candidate = publication.summary?.trim().length ? publication.summary.trim() : publication.body.trim();
+  if (candidate.length <= 180) return candidate;
+  return `${candidate.slice(0, 177)}…`;
+}
+
+function IssueSharedContextCard({
+  publications,
+}: {
+  publications: SharedContextPublication[];
+}) {
+  if (publications.length === 0) return null;
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-amber-500/20 bg-card/95 shadow-[0_18px_50px_rgba(245,158,11,0.08)]">
+      <div className="border-b border-border/60 bg-amber-500/[0.04] px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+            Shared Context
+          </div>
+          <span className="rounded-full border border-amber-500/20 bg-amber-500/[0.08] px-2.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+            {publications.length} linked item{publications.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Published and proposed context packets attached directly to this issue for governed cross-agent recall.
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 py-4">
+        {publications.map((publication) => (
+          <div key={publication.id} className="rounded-lg border border-border/60 bg-background/60 px-3 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/20 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300">
+                <BookMarked className="h-3.5 w-3.5" />
+              </span>
+              <span className="text-sm font-medium text-foreground">{publication.title}</span>
+              <StatusBadge status={publication.status} />
+              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {visibilityLabel(publication.visibility)}
+              </span>
+              <span className="rounded-full border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {freshnessLabel(publication.freshness)}
+              </span>
+            </div>
+            <div className="mt-2 text-sm leading-6 text-foreground">{publicationPreview(publication)}</div>
+            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+              {publication.sourceAgentId ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
+                  Agent {publication.sourceAgentId.slice(0, 8)}
+                </span>
+              ) : null}
+              {publication.createdByRunId ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1 font-mono">
+                  Run {publication.createdByRunId.slice(0, 8)}
+                </span>
+              ) : null}
+              {typeof publication.provenance?.source === "string" && publication.provenance.source.trim().length > 0 ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                  Source {humanize(publication.provenance.source)}
+                </span>
+              ) : null}
+              <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                Freshness {freshnessLabel(publication.freshness)}
+              </span>
+              {publication.confidence !== null ? (
+                <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                  Confidence {Math.round(publication.confidence * 100)}%
+                </span>
+              ) : null}
+              {publication.tags.map((tag) => (
+                <span key={tag} className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                  #{tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function countByType(orchestration: IssueOrchestrationSummary) {
   return orchestration.nodes.reduce(
     (acc, node) => {
@@ -55,6 +220,7 @@ export function IssueRunGraphCard({
   if (!orchestration) return null;
 
   const counts = countByType(orchestration);
+  const issueSharedContextPublications = orchestration.issueSharedContextPublications ?? [];
   const lastVerification = orchestration.lastVerificationRunId
     ? orchestration.nodes.find((node) => node.id === orchestration.lastVerificationRunId) ?? null
     : null;
@@ -140,6 +306,16 @@ export function IssueRunGraphCard({
                           Repair {node.repairAttempt}
                         </span>
                       ) : null}
+                      {node.runnerSnapshotJson ? (
+                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                          {runnerTargetLabel(node.runnerSnapshotJson.target)}
+                        </span>
+                      ) : null}
+                      {node.runnerSnapshotJson?.browserCapable ? (
+                        <span className="rounded-full border border-sky-500/30 bg-sky-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+                          Browser Capable
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span className="font-mono">{node.id.slice(0, 8)}</span>
@@ -150,6 +326,23 @@ export function IssueRunGraphCard({
                       ) : null}
                       {node.parentRunId ? <span>Parent {node.parentRunId.slice(0, 8)}</span> : <span>Root run</span>}
                     </div>
+                    {node.runnerSnapshotJson ? (
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                        {node.runnerSnapshotJson.executionMode ? (
+                          <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                            {executionModeLabel(node.runnerSnapshotJson.executionMode)}
+                          </span>
+                        ) : null}
+                        {node.runnerSnapshotJson.workspaceStrategyType ? (
+                          <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                            {workspaceStrategyLabel(node.runnerSnapshotJson.workspaceStrategyType)}
+                          </span>
+                        ) : null}
+                        <span className="rounded-full border border-border/60 bg-background/60 px-2 py-1">
+                          {isolationBoundaryLabel(node.runnerSnapshotJson.isolationBoundary)}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}
@@ -173,6 +366,8 @@ export function IssueRunGraphCard({
           orchestration.lastVerificationRunId ? runLinks?.get(orchestration.lastVerificationRunId) ?? null : null
         }
       />
+
+      <IssueSharedContextCard publications={issueSharedContextPublications} />
     </div>
   );
 }

@@ -205,7 +205,39 @@ make build
 make setup
 make test
 make verify
+make run
+make bootstrap-ceo
+make dev-up
+make dev-down
+make stop
+make restart
 ```
+
+To build and run the Dockerized app stack and open the product locally:
+
+```bash
+make run
+```
+
+Then visit `http://localhost:3100`.
+
+On the first run, generate the initial admin invite from the running stack:
+
+```bash
+make bootstrap-ceo
+```
+
+Open the printed invite URL to finish setup. Use `make stop` to stop the stack and `make restart` to bounce it.
+
+Do not run `docker compose exec server pnpm paperclipai onboard --yes` inside the already-running Docker stack. `onboard --yes` starts Paperclip at the end of onboarding, which creates a second control-plane process and can interfere with runs.
+
+For source-driven Docker development with hot reload on the same state, use:
+
+```bash
+make dev-up
+```
+
+This starts a watch-mode server on `http://localhost:3100` using the same DB and `/paperclip` data as the packaged stack. Only one Paperclip server should use that shared state at a time; `make dev-up` prompts before taking over from the packaged `server` container, and `make run` switches back to the packaged runtime.
 
 <br/>
 
@@ -258,6 +290,16 @@ Or with `make`:
 ```bash
 make verify
 ```
+
+For the packaged Docker app stack, use:
+
+```bash
+make run
+make bootstrap-ceo
+make dev-up
+```
+
+Avoid `docker compose exec server pnpm paperclipai onboard --yes` once the stack is already up. That command is for bootstrapping a standalone local instance and will start a second Paperclip server when `--yes` is set.
 
 Cursor can attach through [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json), which uses the `app` service from [`docker-compose.yml`](docker-compose.yml) and runs [`bin/setup-container`](bin/setup-container) on first create.
 

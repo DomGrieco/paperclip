@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+BASE_URL="${BASE_URL:-http://localhost:3100}"
+
+if docker compose ps --status running -q server 2>/dev/null | grep -q .; then
+  exec docker compose exec server pnpm paperclipai auth bootstrap-ceo --base-url "$BASE_URL"
+fi
+
+if docker compose --profile dev ps --status running -q server-dev 2>/dev/null | grep -q .; then
+  exec docker compose --profile dev exec server-dev pnpm paperclipai auth bootstrap-ceo --base-url "$BASE_URL"
+fi
+
+echo "No running Paperclip server found. Start packaged mode with 'make run' or hot-reload mode with 'make dev-up' first." >&2
+exit 1

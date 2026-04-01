@@ -64,8 +64,8 @@ function KanbanColumn({
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
-    <div className="flex flex-col min-w-[260px] w-[260px] shrink-0">
-      <div className="flex items-center gap-2 px-2 py-2 mb-1">
+    <div className="flex min-h-0 min-w-[220px] flex-col">
+      <div className="mb-1 flex items-center gap-2 px-1 py-2">
         <StatusIcon status={status} />
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {statusLabel(status)}
@@ -136,7 +136,7 @@ function KanbanCard({
       style={style}
       {...attributes}
       {...listeners}
-      className={`rounded-md border bg-card p-2.5 cursor-grab active:cursor-grabbing transition-shadow ${
+      className={`cursor-grab rounded-md border bg-card p-2 transition-shadow active:cursor-grabbing ${
         isDragging && !isOverlay ? "opacity-30" : ""
       } ${isOverlay ? "shadow-lg ring-1 ring-primary/20" : "hover:shadow-sm"}`}
     >
@@ -148,7 +148,7 @@ function KanbanCard({
           if (isDragging) e.preventDefault();
         }}
       >
-        <div className="flex items-start gap-1.5 mb-1.5">
+        <div className="mb-1 flex items-start gap-1.5">
           <span className="text-xs text-muted-foreground font-mono shrink-0">
             {issue.identifier ?? issue.id.slice(0, 8)}
           </span>
@@ -159,8 +159,8 @@ function KanbanCard({
             </span>
           )}
         </div>
-        <p className="text-sm leading-snug line-clamp-2 mb-2">{issue.title}</p>
-        <div className="flex items-center gap-2">
+        <p className="mb-1.5 text-sm leading-snug line-clamp-3">{issue.title}</p>
+        <div className="flex items-center gap-1.5">
           <PriorityIcon priority={issue.priority} />
           {issue.assigneeAgentId && (() => {
             const name = agentName(issue.assigneeAgentId);
@@ -210,6 +210,18 @@ export function KanbanBoard({
     [activeId, issues]
   );
 
+  const visibleStatuses = useMemo(() => {
+    const statusesWithIssues = new Set(
+      boardStatuses.filter((status) => (columnIssues[status]?.length ?? 0) > 0)
+    );
+    return boardStatuses.filter((status) => {
+      if (status === "done" || status === "cancelled") {
+        return statusesWithIssues.has(status);
+      }
+      return true;
+    });
+  }, [columnIssues]);
+
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string);
   }
@@ -253,16 +265,24 @@ export function KanbanBoard({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2">
-        {boardStatuses.map((status) => (
-          <KanbanColumn
-            key={status}
-            status={status}
-            issues={columnIssues[status] ?? []}
-            agents={agents}
-            liveIssueIds={liveIssueIds}
-          />
-        ))}
+      <div className="-mx-2 overflow-x-auto px-2 pb-4">
+        <div
+          className="grid gap-2.5"
+          style={{
+            gridTemplateColumns: `repeat(${visibleStatuses.length}, minmax(220px, 1fr))`,
+            minWidth: `${visibleStatuses.length * 220}px`,
+          }}
+        >
+          {visibleStatuses.map((status) => (
+            <KanbanColumn
+              key={status}
+              status={status}
+              issues={columnIssues[status] ?? []}
+              agents={agents}
+              liveIssueIds={liveIssueIds}
+            />
+          ))}
+        </div>
       </div>
       <DragOverlay>
         {activeIssue ? (

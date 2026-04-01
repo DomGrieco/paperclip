@@ -106,6 +106,13 @@ make build
 make setup
 make test
 make verify
+make run
+make bootstrap-ceo
+make dev-up
+make dev-down
+make dev-logs
+make stop
+make restart
 ```
 
 What this does:
@@ -113,8 +120,44 @@ What this does:
 - `app` mounts the repo at `/workspace`
 - `bin/setup-container` runs `pnpm install --frozen-lockfile`
 - `bin/test-container` runs `pnpm typecheck`, `pnpm test:run`, and `pnpm build`
+- `make run` restores the packaged Docker runtime at `http://localhost:3100`
+- `make bootstrap-ceo` generates the first admin invite for whichever Docker runtime mode is currently running
+- `make dev-up` switches to a Docker hot-reload server on `http://localhost:3100` using the same DB and `/paperclip` state as the packaged server
+- `make dev-down` stops the hot-reload server
+- `make dev-logs` tails the hot-reload server logs
+- `make stop` stops the Docker app stack
+- `make restart` restarts the Docker app stack
 
 Cursor can attach through `.devcontainer/devcontainer.json`, which targets the same `app` service and runs `bin/setup-container` after container creation.
+
+When the packaged Docker stack is already running, do not use `docker compose exec server pnpm paperclipai onboard --yes` for setup. `onboard --yes` runs the Paperclip server at the end of onboarding, which can leave a second control-plane process running inside the same container and cause orphaned or conflicting runs. Use `make bootstrap-ceo` instead.
+
+### Docker Hot-Reload Mode With Shared State
+
+Use the packaged runtime when you want to test the built image:
+
+```sh
+make run
+```
+
+Use the hot-reload runtime when you want source edits to take effect without rebuilding:
+
+```sh
+make dev-up
+```
+
+Important behavior:
+
+- `make dev-up` uses the same `db` service and the same `/paperclip` data volume as `make run`
+- only one Paperclip server should own that shared state at a time
+- if the packaged `server` container is already running on port `3100`, `make dev-up` prompts before stopping it and taking over
+- `make run` stops `server-dev` first and returns you to the packaged runtime on the same shared state
+
+To stop the hot-reload server:
+
+```sh
+make dev-down
+```
 
 ## Docker For Untrusted PR Review
 

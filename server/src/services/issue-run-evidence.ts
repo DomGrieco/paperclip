@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import type { AdapterArtifactReport } from "@paperclipai/adapter-utils";
 import type { Db } from "@paperclipai/db";
 import { heartbeatRunArtifacts, heartbeatRuns, issues } from "@paperclipai/db";
 import type {
@@ -9,6 +10,12 @@ import type {
   OrchestrationArtifactBundle,
   OrchestrationArtifactBundleItem,
   OrchestrationPolicySnapshot,
+  StructuredChildOutput,
+  SwarmArtifactKind,
+  SwarmPlannerSynthesis,
+  SwarmReviewerDecision,
+  SwarmReviewerDecisionRecord,
+  SwarmSubtask,
   VerificationVerdict,
 } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
@@ -71,6 +78,76 @@ function toArtifactItem(artifact: HeartbeatRunArtifact): OrchestrationArtifactBu
     ...(artifact.issueWorkProductId ? { issueWorkProductId: artifact.issueWorkProductId } : {}),
     ...(artifact.metadata ? { metadata: artifact.metadata } : {}),
   };
+}
+
+function parseRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+function readStructuredChildOutput(value: Record<string, unknown> | null | undefined): StructuredChildOutput | null {
+  if (!value) return null;
+  const orchestration = parseRecord(value.orchestration);
+  const candidate = parseRecord(value.childOutput) ?? parseRecord(orchestration?.childOutput) ?? parseRecord(value.output);
+  if (!candidate) return null;
+
+  const summary = typeof candidate.summary === "string" && candidate.summary.trim().length > 0
+    ? candidate.summary.trim()
+    : null;
+  if (!summary) return null;
+
+  const artifactClaims = Array.isArray(candidate.artifactClaims)
+    ? candidate.artifactClaims
+        .map((entry) => {
+          const claim = parseRecord(entry);
+          const kind = typeof claim?.kind === "string" && claim.kind.trim().length > 0 ? claim.kind.trim() : null;
+          if (!kind) return null;
+          return {
+            kind,
+            ...(typeof claim?.label === "string" && claim.label.trim().length > 0 ? { label: claim.label.trim() } : {}),
+            ...(typeof claim?.detail === "string" && claim.detail.trim().length > 0 ? { detail: claim.detail.trim() } : {}),
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    : [];
+
+  const status = candidate.status === "completed" || candidate.status === "blocked" ? candidate.status : null;
+  return {
+    summary,
+    ...(status ? { status } : {}),
+    ...(parseStringArray(candidate.notes).length > 0 ? { notes: parseStringArray(candidate.notes) } : {}),
+    ...(artifactClaims.length > 0 ? { artifactClaims } : {}),
+  };
+}
+
+function readSwarmSubtask(value: Record<string, unknown> | null | undefined): SwarmSubtask | null {
+  const subtask = parseRecord(value?.swarmSubtask);
+  if (!subtask) return null;
+  return subtask as unknown as SwarmSubtask;
+}
+
+function readRequiredArtifactKinds(subtask: SwarmSubtask | null): SwarmArtifactKind[] {
+  if (!subtask || !Array.isArray(subtask.expectedArtifacts)) return [];
+  return subtask.expectedArtifacts
+    .filter((artifact) => artifact.required)
+    .map((artifact) => artifact.kind)
+    .filter((kind): kind is SwarmArtifactKind => typeof kind === "string" && kind.trim().length > 0);
+}
+
+function summarizeSynthesis(decisions: SwarmReviewerDecisionRecord[]): string {
+  const accepted = decisions.filter((decision) => decision.decision === "accept");
+  const repair = decisions.filter((decision) => decision.decision === "request_repair");
+  const rejected = decisions.filter((decision) => decision.decision === "reject");
+  const acceptedLabels = accepted
+    .map((decision) => decision.taskKey ?? decision.subtaskId ?? decision.workerRunId)
+    .slice(0, 3)
+    .join(", ");
+  const acceptedText = accepted.length > 0 ? ` Accepted: ${acceptedLabels}.` : "";
+  return `Accepted ${accepted.length} child outputs, requested repair for ${repair.length}, rejected ${rejected.length}.${acceptedText}`;
 }
 
 export function issueRunEvidenceService(db: Db) {
@@ -175,6 +252,33 @@ export function issueRunEvidenceService(db: Db) {
     };
   }
 
+  async function persistReportedRunArtifacts(input: {
+    companyId: string;
+    runId: string;
+    issueId: string | null;
+    artifacts: AdapterArtifactReport[];
+  }) {
+    if (input.artifacts.length === 0) return [];
+
+    return db
+      .insert(heartbeatRunArtifacts)
+      .values(
+        input.artifacts.map((artifact) => ({
+          companyId: input.companyId,
+          runId: input.runId,
+          issueId: artifact.issueId ?? input.issueId,
+          artifactKind: artifact.artifactKind,
+          role: artifact.role ?? null,
+          label: artifact.label ?? null,
+          assetId: artifact.assetId ?? null,
+          documentId: artifact.documentId ?? null,
+          issueWorkProductId: artifact.issueWorkProductId ?? null,
+          metadata: artifact.metadata ?? null,
+        })),
+      )
+      .returning();
+  }
+
   async function syncVerificationOutcome(runId: string) {
     const verification = await getVerificationRunById(runId);
     if (!verification || verification.runType !== "verification") return null;
@@ -231,8 +335,133 @@ export function issueRunEvidenceService(db: Db) {
     };
   }
 
+  async function synthesizePlannerReview(rootRunId: string) {
+    const planner = await getVerificationRunById(rootRunId);
+    if (!planner || planner.runType !== "planner") return null;
+
+    const workers = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(and(eq(heartbeatRuns.rootRunId, planner.id), eq(heartbeatRuns.runType, "worker")))
+      .orderBy(asc(heartbeatRuns.createdAt), asc(heartbeatRuns.id));
+
+    if (workers.length === 0) return null;
+
+    const decisions: SwarmReviewerDecisionRecord[] = [];
+    let pending = false;
+
+    for (const worker of workers) {
+      const artifacts = await listRunArtifacts(worker.id);
+      const artifactItems = artifacts.map(toArtifactItem);
+      const childOutput = readStructuredChildOutput(worker.resultJson);
+      const subtask = readSwarmSubtask(worker.contextSnapshot);
+      const requiredArtifactKinds = readRequiredArtifactKinds(subtask);
+      const presentKinds = new Set(artifactItems.map((artifact) => artifact.artifactKind));
+      const missingRequiredArtifactKinds = requiredArtifactKinds.filter((kind) => !presentKinds.has(kind));
+      const verification = await db
+        .select()
+        .from(heartbeatRuns)
+        .where(and(eq(heartbeatRuns.parentRunId, worker.id), eq(heartbeatRuns.runType, "verification")))
+        .orderBy(desc(heartbeatRuns.createdAt), desc(heartbeatRuns.id))
+        .limit(1)
+        .then((rows) => rows[0] ?? null);
+
+      if (worker.status === "queued" || worker.status === "running") pending = true;
+      if (verification && (verification.status === "queued" || verification.status === "running")) pending = true;
+
+      const reasons: string[] = [];
+      let decision: SwarmReviewerDecision = "accept";
+      if (worker.status !== "succeeded") {
+        decision = "reject";
+        reasons.push(`worker_${worker.status}`);
+      }
+      if (!childOutput) {
+        decision = decision === "reject" ? decision : "request_repair";
+        reasons.push("missing_structured_child_output");
+      }
+      if (missingRequiredArtifactKinds.length > 0) {
+        decision = decision === "reject" ? decision : "request_repair";
+        reasons.push(`missing_required_artifacts:${missingRequiredArtifactKinds.join(",")}`);
+      }
+      if (verification?.verificationVerdict === "repair") {
+        decision = decision === "reject" ? decision : "request_repair";
+        reasons.push("verification_requested_repair");
+      }
+      if (verification?.verificationVerdict === "fail_terminal") {
+        decision = "reject";
+        reasons.push("verification_failed_terminal");
+      }
+      if (verification && !verification.verificationVerdict) {
+        pending = true;
+      }
+      if (reasons.length === 0) reasons.push("accepted");
+
+      const reviewerDecision: SwarmReviewerDecisionRecord = {
+        workerRunId: worker.id,
+        subtaskId: subtask?.id ?? null,
+        taskKey: typeof worker.contextSnapshot?.taskKey === "string" ? worker.contextSnapshot.taskKey : null,
+        decision,
+        reasons,
+        summary: childOutput?.summary ?? null,
+        verificationRunId: verification?.id ?? null,
+        verificationVerdict: (verification?.verificationVerdict ?? null) as VerificationVerdict | null,
+        acceptedArtifacts: decision === "accept" ? artifactItems : [],
+      };
+      decisions.push(reviewerDecision);
+
+      const workerArtifactBundleJson: OrchestrationArtifactBundle = {
+        ...(worker.artifactBundleJson ?? {}),
+        artifacts: artifactItems,
+        childOutput,
+        reviewerDecision,
+      };
+      await db
+        .update(heartbeatRuns)
+        .set({
+          artifactBundleJson: workerArtifactBundleJson,
+          updatedAt: new Date(),
+        })
+        .where(eq(heartbeatRuns.id, worker.id));
+    }
+
+    const acceptedArtifacts = decisions.flatMap((decision) => decision.acceptedArtifacts ?? []);
+    const synthesis: SwarmPlannerSynthesis = {
+      status: pending ? "pending" : "complete",
+      generatedAt: new Date().toISOString(),
+      summary: summarizeSynthesis(decisions),
+      acceptedChildCount: decisions.filter((decision) => decision.decision === "accept").length,
+      requestRepairChildCount: decisions.filter((decision) => decision.decision === "request_repair").length,
+      rejectedChildCount: decisions.filter((decision) => decision.decision === "reject").length,
+      acceptedArtifacts,
+    };
+
+    const plannerArtifactBundleJson: OrchestrationArtifactBundle = {
+      ...(planner.artifactBundleJson ?? {}),
+      reviewerDecisions: decisions,
+      synthesis,
+      artifacts: acceptedArtifacts,
+      evaluatorSummary: synthesis.summary,
+    };
+
+    await db
+      .update(heartbeatRuns)
+      .set({
+        artifactBundleJson: plannerArtifactBundleJson,
+        updatedAt: new Date(),
+      })
+      .where(eq(heartbeatRuns.id, planner.id));
+
+    return {
+      plannerRunId: planner.id,
+      reviewerDecisions: decisions,
+      synthesis,
+    };
+  }
+
   return {
     getIssueEvidenceBundle,
+    persistReportedRunArtifacts,
     syncVerificationOutcome,
+    synthesizePlannerReview,
   };
 }

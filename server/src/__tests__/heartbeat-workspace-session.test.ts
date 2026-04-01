@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { agents } from "@paperclipai/db";
 import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import {
+  attachPaperclipSharedContextPacketToContext,
   attachRuntimeBundleToContext,
   formatRuntimeWorkspaceWarningLog,
   prioritizeProjectWorkspaceCandidatesForRun,
@@ -287,6 +288,7 @@ describe("resolveRuntimeBundleTargetForAgent", () => {
     expect(resolveRuntimeBundleTargetForAgent("codex_local")).toBe("codex");
     expect(resolveRuntimeBundleTargetForAgent("cursor")).toBe("cursor");
     expect(resolveRuntimeBundleTargetForAgent("opencode_local")).toBe("opencode");
+    expect(resolveRuntimeBundleTargetForAgent("hermes_local")).toBe("hermes");
   });
 
   it("returns null for adapters without feature1 runtime bundle projections", () => {
@@ -309,11 +311,37 @@ describe("attachRuntimeBundleToContext", () => {
         status: "in_progress",
         priority: "high",
       },
-      run: { id: "run-1" },
+      run: {
+        id: "run-1",
+        runType: "worker",
+        rootRunId: "run-0",
+        parentRunId: "run-0",
+        graphDepth: 1,
+        repairAttempt: 0,
+        verificationVerdict: null,
+      },
       policy: {
         tddMode: "required",
         evidencePolicy: "code_ci_evaluator_summary",
         evidencePolicySource: "company_default",
+        maxRepairAttempts: 3,
+        requiresHumanArtifacts: false,
+      },
+      verification: {
+        required: true,
+        requiresEvaluatorSummary: true,
+        requiresArtifacts: false,
+        latestVerificationRunId: null,
+        reviewReadyAt: null,
+        runner: {
+          target: "local_host",
+          provider: "local_process",
+          workspaceStrategyType: null,
+          executionMode: null,
+          browserCapable: false,
+          sandboxed: false,
+          isolationBoundary: "host_process",
+        },
       },
       memory: {
         snippets: [],
@@ -343,6 +371,7 @@ describe("attachRuntimeBundleToContext", () => {
         paperclipRuntimeProjection: { stale: true },
         paperclipPolicy: { stale: true },
         paperclipMemoryRecall: { stale: true },
+        paperclipSharedContextPacket: { stale: true },
       },
       null,
     );
@@ -350,5 +379,109 @@ describe("attachRuntimeBundleToContext", () => {
     expect(context).toEqual({
       issueId: "issue-1",
     });
+  });
+});
+
+describe("attachPaperclipSharedContextPacketToContext", () => {
+  it("builds a governed shared-context packet from the runtime bundle", () => {
+    const bundle: RuntimeBundle = {
+      runtime: "hermes",
+      company: { id: "company-1" },
+      agent: { id: "agent-1", name: "Hermes", adapterType: "hermes_local" },
+      project: { id: "project-1", name: "Project", executionWorkspacePolicy: null },
+      issue: {
+        id: "issue-1",
+        identifier: "TST-1",
+        title: "Ship shared context packet",
+        status: "in_progress",
+        priority: "high",
+      },
+      run: {
+        id: "run-1",
+        runType: "worker",
+        rootRunId: "run-0",
+        parentRunId: "run-0",
+        graphDepth: 1,
+        repairAttempt: 0,
+        verificationVerdict: null,
+      },
+      policy: {
+        tddMode: "required",
+        evidencePolicy: "code_ci_evaluator_summary",
+        evidencePolicySource: "company_default",
+        maxRepairAttempts: 3,
+        requiresHumanArtifacts: false,
+      },
+      verification: {
+        required: true,
+        requiresEvaluatorSummary: true,
+        requiresArtifacts: false,
+        latestVerificationRunId: null,
+        reviewReadyAt: null,
+        runner: {
+          target: "hermes_container",
+          provider: "hermes_container",
+          workspaceStrategyType: null,
+          executionMode: null,
+          browserCapable: false,
+          sandboxed: true,
+          isolationBoundary: "container_process",
+        },
+      },
+      memory: {
+        snippets: [],
+      },
+      projection: {
+        runtime: "hermes",
+        contextKey: "paperclipRuntimeBundle",
+        envVar: "PAPERCLIP_RUNTIME_BUNDLE_JSON",
+        materializationRoot: ".paperclip/runtime",
+      },
+    };
+
+    expect(
+      attachPaperclipSharedContextPacketToContext({}, {
+        runtimeBundle: bundle,
+        workspaceCwd: "/workspace/run-1",
+        runtimeBundleRoot: "/workspace/run-1/.paperclip/runtime",
+        runtimeInstructionsPath: "/workspace/run-1/.paperclip/runtime/instructions.md",
+        sharedContextPath: "/workspace/run-1/.paperclip/context/shared-context.json",
+      }),
+    ).toMatchObject({
+      paperclipSharedContextPacket: {
+        version: "v1",
+        scope: {
+          companyId: "company-1",
+          projectId: "project-1",
+          issueId: "issue-1",
+          runId: "run-1",
+          agentId: "agent-1",
+        },
+        provenance: {
+          source: "runtime_bundle",
+          workspaceCwd: "/workspace/run-1",
+          runtimeBundleRoot: "/workspace/run-1/.paperclip/runtime",
+          runtimeInstructionsPath: "/workspace/run-1/.paperclip/runtime/instructions.md",
+          sharedContextPath: "/workspace/run-1/.paperclip/context/shared-context.json",
+        },
+      },
+    });
+  });
+
+  it("clears the packet when the runtime bundle or workspace is missing", () => {
+    const context = attachPaperclipSharedContextPacketToContext(
+      {
+        paperclipSharedContextPacket: { stale: true },
+      },
+      {
+        runtimeBundle: null,
+        workspaceCwd: "/workspace/run-1",
+        runtimeBundleRoot: null,
+        runtimeInstructionsPath: null,
+        sharedContextPath: null,
+      },
+    );
+
+    expect(context).toEqual({});
   });
 });

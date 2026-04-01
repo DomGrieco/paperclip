@@ -10,13 +10,18 @@ import type {
   WakeupRequestStatus,
 } from "../constants.js";
 import type {
+  HermesContainerLaunchPlan,
   OrchestrationArtifactBundle,
   OrchestrationPolicySnapshot,
+  PaperclipSharedContextPacket,
   RuntimeBundle,
+  RuntimeBundleRunner,
 } from "./orchestration.js";
 
 export interface HeartbeatContextSnapshot extends Record<string, unknown> {
   paperclipRuntimeBundle?: RuntimeBundle | null;
+  paperclipSharedContextPacket?: PaperclipSharedContextPacket | null;
+  paperclipHermesContainerPlan?: HermesContainerLaunchPlan | null;
 }
 
 export interface HeartbeatRun {
@@ -53,6 +58,7 @@ export interface HeartbeatRun {
   verificationVerdict: VerificationVerdict | null;
   repairAttempt: number;
   policySnapshotJson: OrchestrationPolicySnapshot | null;
+  runnerSnapshotJson: RuntimeBundleRunner | null;
   artifactBundleJson: OrchestrationArtifactBundle | null;
   createdAt: Date;
   updatedAt: Date;
