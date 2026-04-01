@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { managedSkills } from "@paperclipai/db";
 import { parseObject } from "../adapters/utils.js";
+import { resolveAgentRuntimeHomeRoot } from "../home-paths.js";
 import { getAgentContainerProfile } from "./agent-container-profiles.js";
 
 type SupportedAdapterType = "hermes_local" | "codex_local" | "cursor";
@@ -56,6 +57,8 @@ function parseSkillFrontmatter(markdown: string): { name: string | null; descrip
 }
 
 function resolveNativeHomeHostPath(input: {
+  companyId: string;
+  agentId: string;
   adapterType: SupportedAdapterType;
   executionWorkspaceCwd: string;
   executionConfig: Record<string, unknown>;
@@ -63,11 +66,13 @@ function resolveNativeHomeHostPath(input: {
   const profile = getAgentContainerProfile(input.adapterType);
   const env = parseObject(input.executionConfig.env);
   const configuredHome = readString(env[profile.homeEnvName]);
-  if (configuredHome) return configuredHome;
-  if (input.adapterType === "cursor") {
-    return path.join(input.executionWorkspaceCwd, ".paperclip", "cursor-home");
+  const persistentHome = resolveAgentRuntimeHomeRoot(input.companyId, input.agentId, input.adapterType);
+  if (configuredHome) {
+    return configuredHome.startsWith(`${input.executionWorkspaceCwd}${path.sep}`)
+      ? persistentHome
+      : configuredHome;
   }
-  return path.join(input.executionWorkspaceCwd, ".paperclip", `${profile.adapterType}-home`);
+  return persistentHome;
 }
 
 function resolveNativeSkillsHostPath(input: {
@@ -109,6 +114,8 @@ export async function importNativeSkillsFromCompletedRun(db: Db, input: {
   }
 
   const nativeHomeHostPath = resolveNativeHomeHostPath({
+    companyId: input.companyId,
+    agentId: input.agentId,
     adapterType: input.adapterType,
     executionWorkspaceCwd: input.executionWorkspaceCwd,
     executionConfig: input.executionConfig,

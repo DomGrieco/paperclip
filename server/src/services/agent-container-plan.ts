@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { AgentContainerEnvPlan, AgentContainerLaunchPlan, RuntimeBundle, RuntimeBundleRunner } from "@paperclipai/shared";
 import { parseObject } from "../adapters/utils.js";
+import { resolveAgentRuntimeHomeRoot } from "../home-paths.js";
 import {
   AGENT_CONTAINER_SHARED_CONTEXT_PATH,
   AGENT_CONTAINER_WORKSPACE_PATH,
@@ -66,8 +67,18 @@ export function buildAgentContainerLaunchPlan(input: {
   const profile = getAgentContainerProfile(input.adapterType);
   const envRecord = parseObject(input.executionConfig.env);
   const workspaceHostPath = input.executionWorkspaceCwd;
+  const companyId = readString(input.runtimeBundle?.company?.id) ?? null;
+  const configuredAgentHomeHostPath = readString(envRecord[profile.homeEnvName]);
+  const persistentAgentHomeHostPath =
+    companyId ? resolveAgentRuntimeHomeRoot(companyId, input.agentId, profile.adapterType) : null;
   const agentHomeHostPath =
-    readString(envRecord[profile.homeEnvName]) ?? path.join(workspaceHostPath, ".paperclip", `${profile.adapterType}-home`);
+    configuredAgentHomeHostPath && persistentAgentHomeHostPath
+      ? (configuredAgentHomeHostPath.startsWith(`${workspaceHostPath}${path.sep}`)
+          ? persistentAgentHomeHostPath
+          : configuredAgentHomeHostPath)
+      : configuredAgentHomeHostPath
+        ?? persistentAgentHomeHostPath
+        ?? path.join(workspaceHostPath, ".paperclip", `${profile.adapterType}-home`);
   const sharedAuthSourceHostPath = profile.sharedAuthSourceEnvName
     ? readString(envRecord[profile.sharedAuthSourceEnvName])
     : null;

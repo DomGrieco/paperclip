@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agents,
   applyPendingMigrations,
@@ -91,6 +91,7 @@ function managedSkillMarkdown(name: string, description: string, heading = name,
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   while (runningInstances.length > 0) {
     const instance = runningInstances.pop();
     if (!instance) continue;
@@ -123,8 +124,22 @@ describe("importNativeSkillsFromCompletedRun", () => {
     }).returning();
 
     const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-native-home-"));
-    tempPaths.push(workspaceRoot);
-    const skillsRoot = path.join(workspaceRoot, ".paperclip", "codex_local-home", "skills");
+    const paperclipHome = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-instance-home-"));
+    tempPaths.push(workspaceRoot, paperclipHome);
+    vi.stubEnv("PAPERCLIP_HOME", paperclipHome);
+    vi.stubEnv("PAPERCLIP_INSTANCE_ID", "default");
+    const skillsRoot = path.join(
+      paperclipHome,
+      "instances",
+      "default",
+      "companies",
+      company.id,
+      "agents",
+      agent.id,
+      "homes",
+      "codex_local",
+      "skills",
+    );
     await fs.promises.mkdir(skillsRoot, { recursive: true });
 
     const projectedSource = path.join(workspaceRoot, ".paperclip", "runtime", "skills", "projected-skill");
@@ -223,9 +238,24 @@ describe("importNativeSkillsFromCompletedRun", () => {
       permissions: {},
     }).returning();
 
-    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-hermes-native-home-"));
-    tempPaths.push(workspaceRoot);
-    const skillsRoot = path.join(workspaceRoot, ".paperclip", "hermes_local-home", "skills");
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-native-home-refresh-"));
+    const paperclipHome = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-instance-home-refresh-"));
+    tempPaths.push(workspaceRoot, paperclipHome);
+    vi.stubEnv("PAPERCLIP_HOME", paperclipHome);
+    vi.stubEnv("PAPERCLIP_INSTANCE_ID", "default");
+    const skillsRoot = path.join(
+      paperclipHome,
+      "instances",
+      "default",
+      "companies",
+      company.id,
+      "agents",
+      agent.id,
+      "homes",
+      "hermes_local",
+      "skills",
+    );
+    await fs.promises.mkdir(skillsRoot, { recursive: true });
     const authoredDir = path.join(skillsRoot, "native-memory");
     await fs.promises.mkdir(authoredDir, { recursive: true });
 

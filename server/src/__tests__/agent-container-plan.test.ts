@@ -1,7 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeBundle } from "@paperclipai/shared";
 import { buildAgentContainerLaunchPlan } from "../services/agent-container-plan.js";
 import { getAgentContainerProfile } from "../services/agent-container-profiles.js";
+
+beforeEach(() => {
+  vi.stubEnv("PAPERCLIP_HOME", "/Users/test/.paperclip");
+  vi.stubEnv("PAPERCLIP_INSTANCE_ID", "default");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function buildRuntimeBundle(): RuntimeBundle {
   return {
@@ -190,7 +199,11 @@ describe("buildAgentContainerLaunchPlan", () => {
     expect(plan.command).toEqual(["/paperclip/runtime/codex-managed/bin/codex"]);
     expect(plan.mounts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "agent_home", containerPath: "/home/codex/.codex" }),
+        expect.objectContaining({
+          kind: "agent_home",
+          hostPath: "/Users/test/.paperclip/instances/default/companies/company-1/agents/agent-codex/homes/codex_local",
+          containerPath: "/home/codex/.codex",
+        }),
         expect.objectContaining({ kind: "managed_runtime", containerPath: "/paperclip/runtime/codex-managed" }),
       ]),
     );
@@ -239,7 +252,11 @@ describe("buildAgentContainerLaunchPlan", () => {
     expect(plan.command).toEqual(["/paperclip/runtime/cursor-managed/.local/bin/agent"]);
     expect(plan.mounts).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "agent_home", containerPath: "/home/cursor" }),
+        expect.objectContaining({
+          kind: "agent_home",
+          hostPath: "/Users/test/.paperclip/instances/default/companies/company-1/agents/agent-cursor/homes/cursor",
+          containerPath: "/home/cursor",
+        }),
         expect.objectContaining({ kind: "managed_runtime", containerPath: "/paperclip/runtime/cursor-managed" }),
       ]),
     );

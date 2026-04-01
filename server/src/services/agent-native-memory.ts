@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { sharedContextPublications } from "@paperclipai/db";
 import { parseObject } from "../adapters/utils.js";
-import { resolveCompanySharedMemoryRoot } from "../home-paths.js";
+import { resolveAgentRuntimeHomeRoot, resolveCompanySharedMemoryRoot } from "../home-paths.js";
 import { getAgentContainerProfile } from "./agent-container-profiles.js";
 
 type SupportedAdapterType = "hermes_local";
@@ -42,6 +42,8 @@ function normalizeMarkdownBody(value: string): string {
 }
 
 function resolveNativeHomeHostPath(input: {
+  companyId: string;
+  agentId: string;
   adapterType: SupportedAdapterType;
   executionWorkspaceCwd: string;
   executionConfig: Record<string, unknown>;
@@ -49,8 +51,13 @@ function resolveNativeHomeHostPath(input: {
   const profile = getAgentContainerProfile(input.adapterType);
   const env = parseObject(input.executionConfig.env);
   const configuredHome = readString(env[profile.homeEnvName]);
-  if (configuredHome) return configuredHome;
-  return path.join(input.executionWorkspaceCwd, ".paperclip", `${profile.adapterType}-home`);
+  const persistentHome = resolveAgentRuntimeHomeRoot(input.companyId, input.agentId, input.adapterType);
+  if (configuredHome) {
+    return configuredHome.startsWith(`${input.executionWorkspaceCwd}${path.sep}`)
+      ? persistentHome
+      : configuredHome;
+  }
+  return persistentHome;
 }
 
 async function resolveHermesNativeMemoryFiles(input: {
@@ -128,6 +135,8 @@ export async function importNativeMemoryFromCompletedRun(db: Db, input: {
 
   const adapterType: SupportedAdapterType = input.adapterType;
   const nativeHomeHostPath = resolveNativeHomeHostPath({
+    companyId: input.companyId,
+    agentId: input.agentId,
     adapterType,
     executionWorkspaceCwd: input.executionWorkspaceCwd,
     executionConfig: input.executionConfig,
