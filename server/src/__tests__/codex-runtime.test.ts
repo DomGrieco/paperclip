@@ -21,6 +21,7 @@ vi.mock("../services/codex-managed-runtime.js", () => ({
 
 describe("prepareCodexAdapterConfigForExecution", () => {
   it("injects managed Codex runtime env and command when command is not explicitly configured", async () => {
+    vi.stubEnv("HOME", "/paperclip");
     const nextConfig = await prepareCodexAdapterConfigForExecution({
       config: {
         env: {
@@ -38,7 +39,7 @@ describe("prepareCodexAdapterConfigForExecution", () => {
       PAPERCLIP_CODEX_MANAGED_RUNTIME_CHANNEL: "stable",
       PAPERCLIP_CODEX_MANAGED_RUNTIME_SOURCE: "@openai/codex@latest",
       PAPERCLIP_CODEX_MANAGED_RUNTIME_REFRESHED: "true",
-      PAPERCLIP_CODEX_SHARED_HOME_SOURCE: "/paperclip/shared/codex-home-source",
+      PAPERCLIP_CODEX_SHARED_HOME_SOURCE: "/paperclip/.codex",
     });
   });
 

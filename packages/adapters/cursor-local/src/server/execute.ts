@@ -199,6 +199,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
 
   const envConfig = parseObject(config.env);
+  const containerWorkspacePath = asString(envConfig.PAPERCLIP_AGENT_CONTAINER_WORKSPACE_PATH, "").trim();
+  const cursorWorkspacePath = containerWorkspacePath || cwd;
   const configuredHome = asString(envConfig.HOME, "").trim();
   const configuredSkillsHome = configuredHome ? path.join(configuredHome, ".cursor", "skills") : undefined;
   await ensureCursorSkillsInjected(
@@ -400,7 +402,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   };
 
   const buildArgs = (resumeSessionId: string | null) => {
-    const args = ["-p", "--output-format", "stream-json", "--workspace", cwd];
+    const args = ["-p", "--output-format", "stream-json", "--workspace", cursorWorkspacePath];
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     if (model) args.push("--model", model);
     if (mode) args.push("--mode", mode);

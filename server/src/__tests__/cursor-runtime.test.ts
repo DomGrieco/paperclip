@@ -128,6 +128,7 @@ describe("injectCursorContainerExecConfig", () => {
       PAPERCLIP_AGENT_CONTAINER_ID: "container-cursor-123",
       PAPERCLIP_AGENT_CONTAINER_COMMAND: "/paperclip/runtime/cursor-managed/.local/bin/agent",
       PAPERCLIP_AGENT_CONTAINER_WORKDIR: "/workspace",
+      PAPERCLIP_AGENT_CONTAINER_WORKSPACE_PATH: "/workspace",
     });
     expect(
       JSON.parse(String((nextConfig.env as Record<string, string>).PAPERCLIP_AGENT_CONTAINER_EXEC_ENV_JSON)),

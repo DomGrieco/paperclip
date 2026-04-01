@@ -61,6 +61,11 @@ type CapturePayload = {
   paperclipEnvKeys: string[];
 };
 
+function workspaceArg(argv: string[]): string | null {
+  const index = argv.indexOf("--workspace");
+  return index >= 0 ? (argv[index + 1] ?? null) : null;
+}
+
 describe("cursor execute", () => {
   it("injects paperclip env vars and prompt note by default", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-cursor-execute-"));
@@ -129,6 +134,7 @@ describe("cursor execute", () => {
       expect(capture.argv).not.toContain("Follow the paperclip heartbeat.");
       expect(capture.argv).not.toContain("--mode");
       expect(capture.argv).not.toContain("ask");
+      expect(workspaceArg(capture.argv)).toBe(workspace);
       expect(capture.paperclipEnvKeys).toEqual(
         expect.arrayContaining([
           "PAPERCLIP_AGENT_ID",

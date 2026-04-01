@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentContainerLaunchPlan } from "@paperclipai/shared";
@@ -5,7 +6,19 @@ import { ensureManagedCodexRuntime, type CodexManagedRuntimeResolution } from ".
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const containerExecScriptPath = path.resolve(moduleDir, "..", "..", "scripts", "agent-container-exec.js");
-const DEFAULT_SHARED_CODEX_HOME_SOURCE = "/paperclip/shared/codex-home-source";
+
+function resolveDefaultSharedCodexHomeSource(): string {
+  const explicitCodexHome =
+    typeof process.env.CODEX_HOME === "string" && process.env.CODEX_HOME.trim().length > 0
+      ? process.env.CODEX_HOME.trim()
+      : null;
+  if (explicitCodexHome) return explicitCodexHome;
+  const homeDir =
+    typeof process.env.HOME === "string" && process.env.HOME.trim().length > 0
+      ? process.env.HOME.trim()
+      : os.homedir();
+  return path.join(homeDir, ".codex");
+}
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -48,7 +61,7 @@ export async function prepareCodexAdapterConfigForExecution(input: {
   }
 
   env.PAPERCLIP_CODEX_SHARED_HOME_SOURCE = readString(env.PAPERCLIP_CODEX_SHARED_HOME_SOURCE)
-    ?? DEFAULT_SHARED_CODEX_HOME_SOURCE;
+    ?? resolveDefaultSharedCodexHomeSource();
 
   nextConfig.env = env;
   return nextConfig;

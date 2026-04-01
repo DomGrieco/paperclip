@@ -68,6 +68,7 @@ export function injectCursorContainerExecConfig(input: {
   env.PAPERCLIP_AGENT_CONTAINER_ID = input.containerId;
   env.PAPERCLIP_AGENT_CONTAINER_COMMAND = input.plan.command[0] ?? "agent";
   env.PAPERCLIP_AGENT_CONTAINER_WORKDIR = input.plan.workingDir;
+  env.PAPERCLIP_AGENT_CONTAINER_WORKSPACE_PATH = input.plan.workspacePath;
   env.PAPERCLIP_AGENT_CONTAINER_EXEC_ENV_JSON = JSON.stringify(planEnv);
   nextConfig.env = env;
   return nextConfig;

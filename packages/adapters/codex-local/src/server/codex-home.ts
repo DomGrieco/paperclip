@@ -4,7 +4,9 @@ import path from "node:path";
 import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
 
 const TRUTHY_ENV_RE = /^(1|true|yes|on)$/i;
-const COPIED_SHARED_FILES = ["config.json", "config.toml", "instructions.md"] as const;
+const COPIED_SHARED_FILES = ["config.json", "config.toml", "instructions.md", "models_cache.json"] as const;
+const COPIED_SHARED_DIRS = ["log", "memories", "sessions", "shell_snapshots", "tmp"] as const;
+const SHARED_STATE_FILE_RE = /^(state|logs)_\d+\.sqlite$/;
 const SYMLINKED_SHARED_FILES = ["auth.json"] as const;
 
 function nonEmpty(value: string | undefined): string | null {
@@ -69,13 +71,22 @@ async function ensureCopiedFile(target: string, source: string): Promise<void> {
   await fs.copyFile(source, target);
 }
 
+async function ensureCopiedDirectory(target: string, source: string): Promise<void> {
+  const existing = await fs.lstat(target).catch(() => null);
+  if (existing) return;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.cp(source, target, { recursive: true, preserveTimestamps: true });
+}
+
 export async function syncSharedCodexHome(input: {
   targetHome: string;
   sourceHome: string;
+  symlinkSourceHome?: string;
   onLog?: AdapterExecutionContext["onLog"];
 }): Promise<boolean> {
   const targetHome = path.resolve(input.targetHome);
   const sourceHome = path.resolve(input.sourceHome);
+  const symlinkSourceHome = input.symlinkSourceHome ? input.symlinkSourceHome : sourceHome;
   if (targetHome === sourceHome) return false;
   if (!(await pathExists(sourceHome))) return false;
 
@@ -85,7 +96,8 @@ export async function syncSharedCodexHome(input: {
   for (const name of SYMLINKED_SHARED_FILES) {
     const source = path.join(sourceHome, name);
     if (!(await pathExists(source))) continue;
-    await ensureSymlink(path.join(targetHome, name), source);
+    const symlinkTarget = path.join(symlinkSourceHome, name);
+    await ensureSymlink(path.join(targetHome, name), symlinkTarget);
     copiedAny = true;
   }
 
@@ -93,6 +105,22 @@ export async function syncSharedCodexHome(input: {
     const source = path.join(sourceHome, name);
     if (!(await pathExists(source))) continue;
     await ensureCopiedFile(path.join(targetHome, name), source);
+    copiedAny = true;
+  }
+
+  for (const name of COPIED_SHARED_DIRS) {
+    const source = path.join(sourceHome, name);
+    if (!(await pathExists(source))) continue;
+    await ensureCopiedDirectory(path.join(targetHome, name), source);
+    copiedAny = true;
+  }
+
+  const sharedEntries = await fs.readdir(sourceHome, { withFileTypes: true }).catch(() => []);
+  for (const entry of sharedEntries) {
+    if (!entry.isFile()) continue;
+    if (!SHARED_STATE_FILE_RE.test(entry.name)) continue;
+    const source = path.join(sourceHome, entry.name);
+    await ensureCopiedFile(path.join(targetHome, entry.name), source);
     copiedAny = true;
   }
 

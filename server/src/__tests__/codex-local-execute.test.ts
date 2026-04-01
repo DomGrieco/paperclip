@@ -290,6 +290,83 @@ describe("codex execute", () => {
     }
   });
 
+  it("seeds a container agent-home mount from the shared Codex home source", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-container-home-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "codex");
+    const capturePath = path.join(root, "capture.json");
+    const sharedCodexHome = path.join(root, "shared-codex-home");
+    const mountedAgentHome = path.join(root, "mounted-agent-home");
+    await fs.mkdir(workspace, { recursive: true });
+    await fs.mkdir(sharedCodexHome, { recursive: true });
+    await fs.mkdir(path.join(sharedCodexHome, "sessions"), { recursive: true });
+    await fs.writeFile(path.join(sharedCodexHome, "auth.json"), '{"token": "***"}\n', "utf8");
+    await fs.writeFile(path.join(sharedCodexHome, "config.toml"), 'model = "codex-mini-latest"\n', "utf8");
+    await fs.writeFile(path.join(sharedCodexHome, "state_5.sqlite"), "sqlite-state", "utf8");
+    await fs.writeFile(path.join(sharedCodexHome, "sessions", "session.json"), '{"session":true}\n', "utf8");
+    await writeFakeCodexCommand(commandPath);
+
+    try {
+      const result = await execute({
+        runId: "run-2b",
+        agent: {
+          id: "agent-1",
+          companyId: "company-1",
+          name: "Codex Coder",
+          adapterType: "codex_local",
+          adapterConfig: {},
+        },
+        runtime: {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey: null,
+        },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+          env: {
+            PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
+            PAPERCLIP_CODEX_SHARED_HOME_SOURCE: sharedCodexHome,
+          },
+          promptTemplate: "Follow the paperclip heartbeat.",
+        },
+        context: {
+          paperclipAgentContainerPlan: {
+            mounts: [
+              {
+                kind: "agent_home",
+                hostPath: mountedAgentHome,
+                containerPath: "/home/codex/.codex",
+              },
+              {
+                kind: "shared_auth",
+                hostPath: sharedCodexHome,
+                containerPath: "/paperclip/shared/codex-home-source",
+              },
+            ],
+          },
+        },
+        authToken: "run-jwt-token",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.errorMessage).toBeNull();
+
+      const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
+      expect(capture.codexHome).toBe(mountedAgentHome);
+      const mountedAuthPath = path.join(mountedAgentHome, "auth.json");
+      expect((await fs.lstat(mountedAuthPath)).isSymbolicLink()).toBe(true);
+      expect(await fs.readlink(mountedAuthPath)).toBe("/paperclip/shared/codex-home-source/auth.json");
+      expect(await fs.readFile(path.join(mountedAgentHome, "config.toml"), "utf8")).toBe(
+        'model = "codex-mini-latest"\n',
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("retries once when codex hits a transient websocket 500 error", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-retry-"));
     const workspace = path.join(root, "workspace");

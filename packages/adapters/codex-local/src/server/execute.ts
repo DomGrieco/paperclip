@@ -58,6 +58,19 @@ function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean 
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
+function resolveContainerMountPath(planValue: unknown, kind: string, field: "hostPath" | "containerPath"): string | null {
+  const plan = parseObject(planValue);
+  const mounts = Array.isArray(plan.mounts)
+    ? plan.mounts.filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null)
+    : [];
+  for (const mount of mounts) {
+    if (asString(mount.kind, "") !== kind) continue;
+    const resolved = asString(mount[field], "");
+    if (resolved) return field === "hostPath" ? path.resolve(resolved) : resolved;
+  }
+  return null;
+}
+
 function resolveCodexBillingType(env: Record<string, string>): "api" | "subscription" {
   // Codex uses API-key auth when OPENAI_API_KEY is present; otherwise rely on local login/session auth.
   return hasNonEmptyEnvValue(env, "OPENAI_API_KEY") ? "api" : "subscription";
@@ -239,9 +252,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         : ".paperclip/runtime",
     runtimeBundle: context.paperclipRuntimeBundle,
   });
+  const containerAgentHomeHostPath = resolveContainerMountPath(context.paperclipAgentContainerPlan, "agent_home", "hostPath");
+  const containerSharedAuthPath = resolveContainerMountPath(context.paperclipAgentContainerPlan, "shared_auth", "containerPath");
   const preparedWorktreeCodexHome =
-    configuredCodexHome ? null : await prepareWorktreeCodexHome(process.env, onLog);
-  const effectiveCodexHome = configuredCodexHome ?? preparedWorktreeCodexHome;
+    configuredCodexHome || containerAgentHomeHostPath ? null : await prepareWorktreeCodexHome(process.env, onLog);
+  const effectiveCodexHome = configuredCodexHome ?? containerAgentHomeHostPath ?? preparedWorktreeCodexHome;
   const sharedCodexHomeSource =
     typeof envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE === "string" && envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim().length > 0
       ? path.resolve(envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim())
@@ -250,6 +265,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     await syncSharedCodexHome({
       targetHome: effectiveCodexHome,
       sourceHome: sharedCodexHomeSource,
+      symlinkSourceHome: containerSharedAuthPath || undefined,
       onLog,
     });
   }
