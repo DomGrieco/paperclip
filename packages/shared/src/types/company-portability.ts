@@ -46,7 +46,7 @@ export interface CompanyPortabilityManagedSkillManifestEntry {
   name: string;
   path: string;
   description: string | null;
-  status: "active" | "archived";
+  status: "active" | "pending_review" | "archived";
   scopes: CompanyPortabilityManagedSkillScopeManifestEntry[];
 }
 

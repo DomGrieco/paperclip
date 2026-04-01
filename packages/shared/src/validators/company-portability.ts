@@ -57,7 +57,7 @@ export const portabilityManagedSkillManifestEntrySchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   description: z.string().nullable(),
-  status: z.enum(["active", "archived"]),
+  status: z.enum(["active", "pending_review", "archived"]),
   scopes: z.array(portabilityManagedSkillScopeManifestEntrySchema).min(1),
 });
 
