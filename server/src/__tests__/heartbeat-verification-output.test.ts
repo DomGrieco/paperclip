@@ -473,7 +473,9 @@ describe("heartbeat verification output ingestion", () => {
       name: "Hermes CEO",
       role: "ceo",
       adapterType: "hermes_local",
-      adapterConfig: {},
+      adapterConfig: {
+        hermesCommand: "/tmp/test-hermes",
+      },
       runtimeConfig: {},
       permissions: {},
     }).returning();
