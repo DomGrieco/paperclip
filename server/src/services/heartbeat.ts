@@ -57,6 +57,7 @@ import { injectAgentContainerLauncherService } from "./hermes-container-launcher
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
 import { importNativeSkillsFromCompletedRun } from "./agent-native-skill-imports.js";
+import { importNativeMemoryFromCompletedRun } from "./agent-native-memory.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import { logActivity } from "./activity-log.js";
 import {
@@ -2681,6 +2682,45 @@ export function heartbeatService(db: Db) {
         });
       }
 
+      const importedNativeMemory = outcome === "succeeded"
+        ? await importNativeMemoryFromCompletedRun(db, {
+            companyId: agent.companyId,
+            agentId: agent.id,
+            runId: run.id,
+            adapterType: agent.adapterType,
+            executionWorkspaceCwd: executionWorkspace.cwd,
+            executionConfig,
+          }).catch((error) => {
+            logger.warn(
+              {
+                err: error,
+                runId: run.id,
+                agentId: agent.id,
+              },
+              "failed to import native memory after completed run",
+            );
+            return [];
+          })
+        : [];
+      for (const importedMemory of importedNativeMemory) {
+        await logActivity(db, {
+          companyId: agent.companyId,
+          actorType: "agent",
+          actorId: agent.id,
+          agentId: agent.id,
+          runId: run.id,
+          action: "shared_context.imported_native_memory",
+          entityType: "shared_context_publication",
+          entityId: importedMemory.id,
+          details: {
+            kind: importedMemory.kind,
+            importedAt: importedMemory.updatedAt.toISOString(),
+            sourcePath: importedMemory.sourcePath,
+            snapshotPath: importedMemory.snapshotPath,
+          },
+        });
+      }
+
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {
         if (finalizedRun.runType === "planner" && outcome === "succeeded") {
@@ -2719,6 +2759,19 @@ export function heartbeatService(db: Db) {
               importedManagedSkillIds: importedNativeSkills.map((skill) => skill.id),
               importedManagedSkillSlugs: importedNativeSkills.map((skill) => skill.slug),
               importedCount: importedNativeSkills.length,
+            },
+          });
+        }
+        if (importedNativeMemory.length > 0) {
+          await appendRunEvent(runForEvent, seq++, {
+            eventType: "artifact",
+            stream: "system",
+            level: "info",
+            message: `imported ${importedNativeMemory.length} native memory file${importedNativeMemory.length === 1 ? "" : "s"} into shared context`,
+            payload: {
+              importedSharedContextPublicationIds: importedNativeMemory.map((memory) => memory.id),
+              importedKinds: importedNativeMemory.map((memory) => memory.kind),
+              importedCount: importedNativeMemory.length,
             },
           });
         }
