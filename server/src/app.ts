@@ -14,6 +14,7 @@ import { companyRoutes } from "./routes/companies.js";
 import { agentRoutes } from "./routes/agents.js";
 import { projectRoutes } from "./routes/projects.js";
 import { issueRoutes } from "./routes/issues.js";
+import { managedSkillRoutes } from "./routes/managed-skills.js";
 import { sharedContextRoutes } from "./routes/shared-context.js";
 import { executionWorkspaceRoutes } from "./routes/execution-workspaces.js";
 import { goalRoutes } from "./routes/goals.js";
@@ -142,6 +143,7 @@ export async function createApp(
   api.use(assetRoutes(db, opts.storageService));
   api.use(projectRoutes(db));
   api.use(issueRoutes(db, opts.storageService));
+  api.use(managedSkillRoutes(db));
   api.use(sharedContextRoutes(db));
   api.use(executionWorkspaceRoutes(db));
   api.use(goalRoutes(db));

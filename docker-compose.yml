@@ -52,6 +52,7 @@ services:
     volumes:
       - paperclip-data:/paperclip
       - ${HOME}/.hermes:/paperclip/shared/hermes-home-source:ro
+      - ${HOME}/.codex:/paperclip/shared/codex-home-source:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/local/bin/docker:/usr/local/bin/docker:ro
     depends_on:

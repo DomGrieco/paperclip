@@ -4,6 +4,7 @@ export const portabilityIncludeSchema = z
   .object({
     company: z.boolean().optional(),
     agents: z.boolean().optional(),
+    managedSkills: z.boolean().optional(),
   })
   .partial();
 
@@ -39,6 +40,27 @@ export const portabilityAgentManifestEntrySchema = z.object({
   metadata: z.record(z.unknown()).nullable(),
 });
 
+export const portabilityManagedSkillScopeManifestEntrySchema = z.object({
+  scopeType: z.enum(["company", "agent"]),
+  agentSlug: z.string().min(1).nullable(),
+}).superRefine((value, ctx) => {
+  if (value.scopeType === "company" && value.agentSlug) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Company managed-skill scope cannot include agentSlug" });
+  }
+  if (value.scopeType === "agent" && !value.agentSlug) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Agent managed-skill scope requires agentSlug" });
+  }
+});
+
+export const portabilityManagedSkillManifestEntrySchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  path: z.string().min(1),
+  description: z.string().nullable(),
+  status: z.enum(["active", "pending_review", "archived"]),
+  scopes: z.array(portabilityManagedSkillScopeManifestEntrySchema).min(1),
+});
+
 export const portabilityManifestSchema = z.object({
   schemaVersion: z.number().int().positive(),
   generatedAt: z.string().datetime(),
@@ -51,9 +73,11 @@ export const portabilityManifestSchema = z.object({
   includes: z.object({
     company: z.boolean(),
     agents: z.boolean(),
+    managedSkills: z.boolean().default(false),
   }),
   company: portabilityCompanyManifestEntrySchema.nullable(),
   agents: z.array(portabilityAgentManifestEntrySchema),
+  managedSkills: z.array(portabilityManagedSkillManifestEntrySchema).default([]),
   requiredSecrets: z.array(portabilitySecretRequirementSchema).default([]),
 });
 

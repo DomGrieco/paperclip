@@ -83,11 +83,21 @@ function renderPaperclipEnvNote(env: Record<string, string>): string {
   if (paperclipKeys.length === 0) return "";
   const runtimeRoot = env.PAPERCLIP_RUNTIME_ROOT?.trim() ?? "";
   const instructionsPath = env.PAPERCLIP_RUNTIME_INSTRUCTIONS_PATH?.trim() ?? "";
+  const workspaceSource = env.PAPERCLIP_WORKSPACE_SOURCE?.trim() ?? "";
+  const workspaceCwd = env.PAPERCLIP_WORKSPACE_CWD?.trim() ?? "";
   const lines = [
     "Paperclip runtime note:",
     `The following PAPERCLIP_* environment variables are available in this run: ${paperclipKeys.join(", ")}`,
     "Do not assume these variables are missing without checking your shell environment.",
   ];
+  if (workspaceSource === "agent_home") {
+    lines.push(
+      `This run is using a scratch fallback workspace${workspaceCwd ? ` at ${workspaceCwd}` : ""} because no project workspace or resumable session workspace was available.`,
+      "Treat /workspace as disposable scratch space, not as an existing repo checkout.",
+      "Do not create package-manager or repo scaffolding unless the assigned task explicitly requires it.",
+      "Persistent agent state belongs in the native agent home rather than ad hoc files under /workspace.",
+    );
+  }
   if (runtimeRoot && instructionsPath) {
     lines.push(`Paperclip also materialized runtime files in ${runtimeRoot}. Start by reading ${instructionsPath}.`);
   }
@@ -196,9 +206,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         : ".paperclip/runtime",
     runtimeBundle: context.paperclipRuntimeBundle,
   });
-  await ensureCursorSkillsInjected(onLog);
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
 
   const envConfig = parseObject(config.env);
+  const containerWorkspacePath = asString(envConfig.PAPERCLIP_AGENT_CONTAINER_WORKSPACE_PATH, "").trim();
+  const cursorWorkspacePath = containerWorkspacePath || cwd;
+  const configuredHome = asString(envConfig.HOME, "").trim();
+  const configuredSkillsHome = configuredHome ? path.join(configuredHome, ".cursor", "skills") : undefined;
+  await ensureCursorSkillsInjected(
+    onLog,
+    materializedSkillsDir
+      ? {
+          skillsDir: materializedSkillsDir,
+          ...(configuredSkillsHome ? { skillsHome: configuredSkillsHome } : {}),
+        }
+      : configuredSkillsHome
+        ? { skillsHome: configuredSkillsHome }
+        : {},
+  );
+
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
   const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
@@ -386,7 +412,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   };
 
   const buildArgs = (resumeSessionId: string | null) => {
-    const args = ["-p", "--output-format", "stream-json", "--workspace", cwd];
+    const args = ["-p", "--output-format", "stream-json", "--workspace", cursorWorkspacePath];
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     if (model) args.push("--model", model);
     if (mode) args.push("--mode", mode);

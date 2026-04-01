@@ -1,0 +1,34 @@
+import type {
+  CreateManagedSkill,
+  ManagedSkill,
+  ManagedSkillEffectivePreviewResponse,
+  ManagedSkillScopeAssignment,
+  ManagedSkillScopeAssignmentInput,
+  UpdateManagedSkill,
+} from "@paperclipai/shared";
+import { api } from "./client";
+
+export const managedSkillsApi = {
+  list: (companyId: string) => api.get<ManagedSkill[]>(`/companies/${companyId}/managed-skills`),
+  create: (companyId: string, data: CreateManagedSkill) =>
+    api.post<ManagedSkill>(`/companies/${companyId}/managed-skills`, data),
+  get: (companyId: string, skillId: string) =>
+    api.get<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}`),
+  update: (companyId: string, skillId: string, data: UpdateManagedSkill) =>
+    api.patch<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}`, data),
+  archive: (companyId: string, skillId: string) =>
+    api.post<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}/archive`, {}),
+  restore: (companyId: string, skillId: string) =>
+    api.post<ManagedSkill>(`/companies/${companyId}/managed-skills/${skillId}/restore`, {}),
+  listScopes: (companyId: string, skillId: string) =>
+    api.get<ManagedSkillScopeAssignment[]>(`/companies/${companyId}/managed-skills/${skillId}/scopes`),
+  replaceScopes: (companyId: string, skillId: string, assignments: ManagedSkillScopeAssignmentInput[]) =>
+    api.put<ManagedSkillScopeAssignment[]>(`/companies/${companyId}/managed-skills/${skillId}/scopes`, { assignments }),
+  effectivePreview: (companyId: string, filters?: { projectId?: string | null; agentId?: string | null }) => {
+    const params = new URLSearchParams();
+    if (filters?.projectId) params.set("projectId", filters.projectId);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    const qs = params.toString();
+    return api.get<ManagedSkillEffectivePreviewResponse>(`/companies/${companyId}/managed-skills/effective-preview${qs ? `?${qs}` : ""}`);
+  },
+};

@@ -1,6 +1,8 @@
+import { and, eq, ne, sql } from "drizzle-orm";
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import type { Db } from "@paperclipai/db";
+import { heartbeatRuns } from "@paperclipai/db";
 import {
   addIssueCommentSchema,
   createIssueAttachmentMetadataSchema,
@@ -41,6 +43,26 @@ const MAX_ISSUE_COMMENT_LIMIT = 500;
 
 const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function normalizePlannerEvidenceText(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function issueRequiresDelegatedPlannerEvidence(issue: { title?: string | null; description?: string | null }) {
+  const haystack = `${normalizePlannerEvidenceText(issue.title)}\n${normalizePlannerEvidenceText(issue.description)}`;
+  const plannerGrade = haystack.includes("planner-grade validation") || haystack.includes("planner-grade rerun");
+  const explicitDelegation =
+    haystack.includes("delegate at least") ||
+    haystack.includes("child workstream") ||
+    haystack.includes("use hermes engineer") ||
+    haystack.includes("use hermes qa");
+  return plannerGrade && explicitDelegation;
+}
+
+function commentClaimsDelegatedValidation(commentBody: string | null | undefined) {
+  const haystack = normalizePlannerEvidenceText(commentBody);
+  return /(hermes engineer|hermes qa|delegat(?:e|ed|ion)|child workstream)/i.test(haystack);
+}
 
 export function issueRoutes(db: Db, storage: StorageService) {
   const router = Router();
@@ -161,6 +183,84 @@ export function issueRoutes(db: Db, storage: StorageService) {
         },
       });
     }
+    return true;
+  }
+
+  async function getPlannerDelegationEvidence(runId: string) {
+    const plannerRun = await db
+      .select({
+        id: heartbeatRuns.id,
+        runType: heartbeatRuns.runType,
+        rootRunId: heartbeatRuns.rootRunId,
+        agentId: heartbeatRuns.agentId,
+      })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
+    if (!plannerRun || plannerRun.runType !== "planner") return null;
+
+    const rootRunId = plannerRun.rootRunId ?? plannerRun.id;
+    const childStats = await db
+      .select({
+        childRunCount: sql<number>`count(*)::int`,
+        delegatedAgentRunCount:
+          sql<number>`count(distinct case when ${heartbeatRuns.agentId} <> ${plannerRun.agentId} then ${heartbeatRuns.agentId} end)::int`,
+      })
+      .from(heartbeatRuns)
+      .where(and(eq(heartbeatRuns.rootRunId, rootRunId), ne(heartbeatRuns.id, rootRunId)))
+      .then((rows) => rows[0] ?? { childRunCount: 0, delegatedAgentRunCount: 0 });
+
+    return {
+      rootRunId,
+      childRunCount: Number(childStats.childRunCount ?? 0),
+      delegatedAgentRunCount: Number(childStats.delegatedAgentRunCount ?? 0),
+    };
+  }
+
+  async function enforcePlannerDelegationEvidenceGuard(input: {
+    req: Request;
+    res: Response;
+    issue: { id: string; title?: string | null; description?: string | null };
+    requestedStatus?: string | null;
+    commentBody?: string | null;
+  }) {
+    if (input.req.actor.type !== "agent") return true;
+    if (!issueRequiresDelegatedPlannerEvidence(input.issue)) return true;
+
+    const doneRequested = input.requestedStatus === "done";
+    const delegatedClaimRequested = commentClaimsDelegatedValidation(input.commentBody);
+    if (!doneRequested && !delegatedClaimRequested) return true;
+
+    const runId = requireAgentRunId(input.req, input.res);
+    if (!runId) return false;
+    const evidence = await getPlannerDelegationEvidence(runId);
+    if (!evidence) return true;
+
+    if (doneRequested && evidence.childRunCount === 0) {
+      input.res.status(409).json({
+        error: "Planner validation issue cannot be marked done before child-run evidence exists",
+        details: {
+          issueId: input.issue.id,
+          rootRunId: evidence.rootRunId,
+          childRunCount: evidence.childRunCount,
+        },
+      });
+      return false;
+    }
+
+    if (delegatedClaimRequested && evidence.delegatedAgentRunCount === 0) {
+      input.res.status(409).json({
+        error: "Planner validation comment cannot claim delegated evidence before delegated child runs exist",
+        details: {
+          issueId: input.issue.id,
+          rootRunId: evidence.rootRunId,
+          childRunCount: evidence.childRunCount,
+          delegatedAgentRunCount: evidence.delegatedAgentRunCount,
+        },
+      });
+      return false;
+    }
+
     return true;
   }
 
@@ -317,7 +417,12 @@ export function issueRoutes(db: Db, storage: StorageService) {
           : null,
       svc.findMentionedProjectIds(issue.id),
       documentsSvc.getIssueDocumentPayload(issue),
-      issueRunGraph.getIssueSummary(issue.id),
+      issueRunGraph.getIssueSummary(
+        issue.id,
+        req.actor.type === "agent"
+          ? { type: "agent", agentId: req.actor.agentId }
+          : { type: "board" },
+      ),
     ]);
     const mentionedProjects = mentionedProjectIds.length > 0
       ? await projectsSvc.listByIds(issue.companyId, mentionedProjectIds)
@@ -351,7 +456,12 @@ export function issueRoutes(db: Db, storage: StorageService) {
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    const orchestration = await issueRunGraph.getIssueSummary(issue.id);
+    const orchestration = await issueRunGraph.getIssueSummary(
+      issue.id,
+      req.actor.type === "agent"
+        ? { type: "agent", agentId: req.actor.agentId }
+        : { type: "board" },
+    );
     res.json(orchestration);
   });
 
@@ -842,6 +952,15 @@ export function issueRoutes(db: Db, storage: StorageService) {
     if (!(await assertAgentRunCheckoutOwnership(req, res, existing))) return;
 
     const { comment: commentBody, hiddenAt: hiddenAtRaw, ...updateFields } = req.body;
+    if (!(await enforcePlannerDelegationEvidenceGuard({
+      req,
+      res,
+      issue: existing,
+      requestedStatus: typeof updateFields.status === "string" ? updateFields.status : null,
+      commentBody: typeof commentBody === "string" ? commentBody : null,
+    }))) {
+      return;
+    }
     if (hiddenAtRaw !== undefined) {
       updateFields.hiddenAt = hiddenAtRaw ? new Date(hiddenAtRaw) : null;
     }
@@ -1209,6 +1328,14 @@ export function issueRoutes(db: Db, storage: StorageService) {
     }
     assertCompanyAccess(req, issue.companyId);
     if (!(await assertAgentRunCheckoutOwnership(req, res, issue))) return;
+    if (!(await enforcePlannerDelegationEvidenceGuard({
+      req,
+      res,
+      issue,
+      commentBody: typeof req.body.body === "string" ? req.body.body : null,
+    }))) {
+      return;
+    }
 
     const actor = getActorInfo(req);
     const reopenRequested = req.body.reopen === true;

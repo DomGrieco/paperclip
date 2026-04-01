@@ -9,9 +9,11 @@ import type {
   CompanyPortabilityImport,
   CompanyPortabilityImportResult,
   CompanyPortabilityInclude,
+  CompanyPortabilityManagedSkillScopeManifestEntry,
   CompanyPortabilityManifest,
   CompanyPortabilityPreview,
   CompanyPortabilityPreviewAgentPlan,
+  CompanyPortabilityPreviewManagedSkillPlan,
   CompanyPortabilityPreviewResult,
 } from "@paperclipai/shared";
 import { normalizeAgentUrlKey, portabilityManifestSchema } from "@paperclipai/shared";
@@ -19,10 +21,12 @@ import { notFound, unprocessable } from "../errors.js";
 import { accessService } from "./access.js";
 import { agentService } from "./agents.js";
 import { companyService } from "./companies.js";
+import { managedSkillService } from "./managed-skills.js";
 
 const DEFAULT_INCLUDE: CompanyPortabilityInclude = {
   company: true,
   agents: true,
+  managedSkills: true,
 };
 
 const DEFAULT_COLLISION_STRATEGY: CompanyPortabilityCollisionStrategy = "rename";
@@ -139,10 +143,41 @@ function uniqueNameBySlug(baseName: string, existingSlugs: Set<string>) {
   }
 }
 
+function managedSkillScopeKey(scope: CompanyPortabilityManagedSkillScopeManifestEntry): string {
+  return scope.scopeType === "company" ? "company" : `agent:${scope.agentSlug ?? "missing"}`;
+}
+
+function managedSkillScopeSetKey(scopes: CompanyPortabilityManagedSkillScopeManifestEntry[]): string {
+  return scopes.map((scope) => managedSkillScopeKey(scope)).sort().join("|");
+}
+
+function managedSkillCollisionKey(input: {
+  slug: string;
+  scopes: CompanyPortabilityManagedSkillScopeManifestEntry[];
+}): string {
+  return `${managedSkillScopeSetKey(input.scopes)}::${input.slug}`;
+}
+
+function uniqueManagedSkillSlug(
+  baseSlug: string,
+  scopes: CompanyPortabilityManagedSkillScopeManifestEntry[],
+  usedCollisionKeys: Set<string>,
+) {
+  let next = baseSlug;
+  let idx = 2;
+  while (usedCollisionKeys.has(managedSkillCollisionKey({ slug: next, scopes }))) {
+    next = `${baseSlug}-${idx}`;
+    idx += 1;
+  }
+  usedCollisionKeys.add(managedSkillCollisionKey({ slug: next, scopes }));
+  return next;
+}
+
 function normalizeInclude(input?: Partial<CompanyPortabilityInclude>): CompanyPortabilityInclude {
   return {
     company: input?.company ?? DEFAULT_INCLUDE.company,
     agents: input?.agents ?? DEFAULT_INCLUDE.agents,
+    managedSkills: input?.managedSkills ?? DEFAULT_INCLUDE.managedSkills,
   };
 }
 
@@ -482,6 +517,7 @@ export function companyPortabilityService(db: Db) {
   const companies = companyService(db);
   const agents = agentService(db);
   const access = accessService(db);
+  const managedSkillsSvc = managedSkillService(db);
 
   async function resolveSource(source: CompanyPortabilityPreview["source"]): Promise<ResolvedSource> {
     if (source.type === "inline") {
@@ -505,6 +541,10 @@ export function companyPortabilityService(db: Db) {
       }
       for (const agent of manifest.agents) {
         const filePath = ensureMarkdownPath(agent.path);
+        files[filePath] = await fetchText(new URL(filePath, base).toString());
+      }
+      for (const skill of manifest.managedSkills ?? []) {
+        const filePath = ensureMarkdownPath(skill.path);
         files[filePath] = await fetchText(new URL(filePath, base).toString());
       }
 
@@ -543,6 +583,11 @@ export function companyPortabilityService(db: Db) {
         resolveRawGitHubUrl(parsed.owner, parsed.repo, ref, [parsed.basePath, agent.path].filter(Boolean).join("/")),
       );
     }
+    for (const skill of manifest.managedSkills ?? []) {
+      files[skill.path] = await fetchText(
+        resolveRawGitHubUrl(parsed.owner, parsed.repo, ref, [parsed.basePath, skill.path].filter(Boolean).join("/")),
+      );
+    }
     return { manifest, files, warnings };
   }
 
@@ -569,6 +614,7 @@ export function companyPortabilityService(db: Db) {
       includes: include,
       company: null,
       agents: [],
+      managedSkills: [],
       requiredSecrets: [],
     };
 
@@ -682,6 +728,47 @@ export function companyPortabilityService(db: Db) {
       }
     }
 
+    if (include.managedSkills) {
+      const portabilityPathSlugs = new Set<string>();
+      const managedSkillRows = await managedSkillsSvc.listManagedSkills(companyId);
+      for (const skill of managedSkillRows) {
+        const record = await managedSkillsSvc.getManagedSkillRecord(companyId, skill.id);
+        const portableScopes: CompanyPortabilityManagedSkillScopeManifestEntry[] = [];
+        for (const scope of record.scopes) {
+          if (scope.scopeType === "company") {
+            portableScopes.push({ scopeType: "company", agentSlug: null });
+            continue;
+          }
+          if (scope.scopeType === "agent") {
+            const agentSlug = scope.agentId ? (idToSlug.get(scope.agentId) ?? null) : null;
+            if (!agentSlug) {
+              warnings.push(`Skipped managed skill ${record.skill.slug} agent scope because the target agent could not be exported.`);
+              continue;
+            }
+            portableScopes.push({ scopeType: "agent", agentSlug });
+            continue;
+          }
+          warnings.push(`Skipped project-scoped assignment for managed skill ${record.skill.slug}; project portability is not supported in v1.`);
+        }
+        if (portableScopes.length === 0) {
+          warnings.push(`Skipped managed skill ${record.skill.slug} because it has no portable scopes.`);
+          continue;
+        }
+
+        const pathSlug = uniqueSlug(toSafeSlug(record.skill.slug, "managed-skill"), portabilityPathSlugs);
+        const skillPath = `managed-skills/${pathSlug}/SKILL.md`;
+        files[skillPath] = record.skill.bodyMarkdown;
+        manifest.managedSkills.push({
+          slug: record.skill.slug,
+          name: record.skill.name,
+          path: skillPath,
+          description: record.skill.description,
+          status: record.skill.status,
+          scopes: portableScopes,
+        });
+      }
+    }
+
     manifest.requiredSecrets = dedupeRequiredSecrets(requiredSecrets);
     return {
       manifest,
@@ -752,6 +839,11 @@ export function companyPortabilityService(db: Db) {
       }
     }
 
+    const selectedOrExistingAgentSlugs = new Set<string>([
+      ...selectedAgents.map((agent) => agent.slug),
+      ...existingSlugs,
+    ]);
+
     for (const manifestAgent of selectedAgents) {
       const existing = existingSlugToAgent.get(manifestAgent.slug) ?? null;
       if (!existing) {
@@ -798,6 +890,115 @@ export function companyPortabilityService(db: Db) {
       });
     }
 
+    const managedSkillPlans: CompanyPortabilityPreviewManagedSkillPlan[] = [];
+    const existingManagedSkillByCollisionKey = new Map<string, { id: string; name: string; slug: string }>();
+    const usedManagedSkillCollisionKeys = new Set<string>();
+
+    if (input.target.mode === "existing_company") {
+      const existingManagedSkills = await managedSkillsSvc.listManagedSkills(input.target.companyId);
+      const existingAgentById = new Map<string, { id: string; name: string }>();
+      for (const existing of await agents.list(input.target.companyId)) {
+        existingAgentById.set(existing.id, existing);
+      }
+      for (const existing of existingManagedSkills) {
+        const record = await managedSkillsSvc.getManagedSkillRecord(input.target.companyId, existing.id);
+        const portableScopes: CompanyPortabilityManagedSkillScopeManifestEntry[] = [];
+        let unsupportedScope = false;
+        for (const scope of record.scopes) {
+          if (scope.scopeType === "company") {
+            portableScopes.push({ scopeType: "company", agentSlug: null });
+            continue;
+          }
+          if (scope.scopeType === "agent") {
+            const agentRow = scope.agentId ? (existingAgentById.get(scope.agentId) ?? null) : null;
+            const agentSlug = agentRow ? (normalizeAgentUrlKey(agentRow.name) ?? agentRow.id) : null;
+            if (!agentSlug) {
+              unsupportedScope = true;
+              break;
+            }
+            portableScopes.push({ scopeType: "agent", agentSlug });
+            continue;
+          }
+          unsupportedScope = true;
+          break;
+        }
+        if (unsupportedScope || portableScopes.length === 0) continue;
+        const collisionKey = managedSkillCollisionKey({ slug: record.skill.slug, scopes: portableScopes });
+        existingManagedSkillByCollisionKey.set(collisionKey, {
+          id: record.skill.id,
+          name: record.skill.name,
+          slug: record.skill.slug,
+        });
+        usedManagedSkillCollisionKeys.add(collisionKey);
+      }
+    }
+
+    for (const manifestSkill of manifest.managedSkills ?? []) {
+      const filePath = ensureMarkdownPath(manifestSkill.path);
+      const markdown = source.files[filePath];
+      if (typeof markdown !== "string") {
+        errors.push(`Missing markdown file for managed skill ${manifestSkill.slug}: ${filePath}`);
+      }
+      for (const scope of manifestSkill.scopes) {
+        if (scope.scopeType === "agent" && (!scope.agentSlug || !selectedOrExistingAgentSlugs.has(scope.agentSlug))) {
+          errors.push(`Managed skill ${manifestSkill.slug} references unresolved agent scope ${scope.agentSlug ?? "<missing>"}.`);
+        }
+      }
+
+      const collisionKey = managedSkillCollisionKey({ slug: manifestSkill.slug, scopes: manifestSkill.scopes });
+      const existing = existingManagedSkillByCollisionKey.get(collisionKey) ?? null;
+      if (!existing) {
+        usedManagedSkillCollisionKeys.add(collisionKey);
+        managedSkillPlans.push({
+          path: manifestSkill.path,
+          slug: manifestSkill.slug,
+          action: "create",
+          plannedSlug: manifestSkill.slug,
+          plannedName: manifestSkill.name,
+          existingManagedSkillId: null,
+          reason: null,
+        });
+        continue;
+      }
+
+      if (collisionStrategy === "replace") {
+        managedSkillPlans.push({
+          path: manifestSkill.path,
+          slug: manifestSkill.slug,
+          action: "update",
+          plannedSlug: existing.slug,
+          plannedName: manifestSkill.name,
+          existingManagedSkillId: existing.id,
+          reason: "Existing managed skill scope/slug matched; replace strategy.",
+        });
+        continue;
+      }
+
+      if (collisionStrategy === "skip") {
+        managedSkillPlans.push({
+          path: manifestSkill.path,
+          slug: manifestSkill.slug,
+          action: "skip",
+          plannedSlug: existing.slug,
+          plannedName: existing.name,
+          existingManagedSkillId: existing.id,
+          reason: "Existing managed skill scope/slug matched; skip strategy.",
+        });
+        continue;
+      }
+
+      const plannedSlug = uniqueManagedSkillSlug(manifestSkill.slug, manifestSkill.scopes, usedManagedSkillCollisionKeys);
+      managedSkillPlans.push({
+        path: manifestSkill.path,
+        slug: manifestSkill.slug,
+        action: "create",
+        plannedSlug,
+        plannedName: manifestSkill.name,
+        existingManagedSkillId: existing.id,
+        reason: "Existing managed skill scope/slug matched; rename strategy.",
+      });
+    }
+
     const preview: CompanyPortabilityPreviewResult = {
       include,
       targetCompanyId,
@@ -811,6 +1012,7 @@ export function companyPortabilityService(db: Db) {
             ? "update"
             : "none",
         agentPlans,
+        managedSkillPlans,
       },
       requiredSecrets: manifest.requiredSecrets ?? [],
       warnings,
@@ -882,6 +1084,7 @@ export function companyPortabilityService(db: Db) {
     if (!targetCompany) throw notFound("Target company not found");
 
     const resultAgents: CompanyPortabilityImportResult["agents"] = [];
+    const resultManagedSkills: CompanyPortabilityImportResult["managedSkills"] = [];
     const importedSlugToAgentId = new Map<string, string>();
     const existingSlugToAgentId = new Map<string, string>();
     const existingAgents = await agents.list(targetCompany.id);
@@ -982,6 +1185,81 @@ export function companyPortabilityService(db: Db) {
       }
     }
 
+    if (include.managedSkills) {
+      for (const planSkill of plan.preview.plan.managedSkillPlans) {
+        const manifestSkill = (sourceManifest.managedSkills ?? []).find((skill) => skill.path === planSkill.path);
+        if (!manifestSkill) continue;
+        if (planSkill.action === "skip") {
+          resultManagedSkills.push({
+            slug: planSkill.plannedSlug,
+            id: planSkill.existingManagedSkillId,
+            action: "skipped",
+            name: planSkill.plannedName,
+            reason: planSkill.reason,
+          });
+          continue;
+        }
+
+        const bodyMarkdown = plan.source.files[manifestSkill.path];
+        if (!bodyMarkdown) {
+          warnings.push(`Missing SKILL markdown for ${manifestSkill.slug}; skipped import.`);
+          resultManagedSkills.push({
+            slug: planSkill.plannedSlug,
+            id: null,
+            action: "skipped",
+            name: planSkill.plannedName,
+            reason: "Missing SKILL markdown.",
+          });
+          continue;
+        }
+
+        const payload = {
+          name: planSkill.plannedName,
+          slug: planSkill.plannedSlug,
+          description: manifestSkill.description,
+          bodyMarkdown,
+          status: manifestSkill.status,
+        };
+
+        const imported = planSkill.action === "update" && planSkill.existingManagedSkillId
+          ? await managedSkillsSvc.updateManagedSkill(targetCompany.id, planSkill.existingManagedSkillId, payload)
+          : await managedSkillsSvc.createManagedSkill(targetCompany.id, payload);
+
+        const assignments: Array<
+          | { scopeType: "company" }
+          | { scopeType: "agent"; agentId: string }
+        > = [];
+        for (const scope of manifestSkill.scopes) {
+          if (scope.scopeType === "company") {
+            assignments.push({ scopeType: "company" });
+            continue;
+          }
+          const agentId = scope.agentSlug
+            ? (importedSlugToAgentId.get(scope.agentSlug) ?? existingSlugToAgentId.get(scope.agentSlug) ?? null)
+            : null;
+          if (!agentId) {
+            warnings.push(`Could not resolve managed skill agent scope ${scope.agentSlug ?? "<missing>"} for ${manifestSkill.slug}.`);
+            continue;
+          }
+          assignments.push({ scopeType: "agent", agentId });
+        }
+
+        if (assignments.length === 0) {
+          warnings.push(`Managed skill ${manifestSkill.slug} resolved no importable scopes; leaving it unattached.`);
+        } else {
+          await managedSkillsSvc.replaceManagedSkillScopes(targetCompany.id, imported.id, assignments);
+        }
+
+        resultManagedSkills.push({
+          slug: imported.slug,
+          id: imported.id,
+          action: planSkill.action === "update" ? "updated" : "created",
+          name: imported.name,
+          reason: planSkill.reason,
+        });
+      }
+    }
+
     return {
       company: {
         id: targetCompany.id,
@@ -989,6 +1267,7 @@ export function companyPortabilityService(db: Db) {
         action: companyAction,
       },
       agents: resultAgents,
+      managedSkills: resultManagedSkills,
       requiredSecrets: sourceManifest.requiredSecrets ?? [],
       warnings,
     };

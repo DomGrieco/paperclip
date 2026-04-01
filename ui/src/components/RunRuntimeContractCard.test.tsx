@@ -60,10 +60,13 @@ const run: HeartbeatRun = {
         sandboxed: true,
         isolationBoundary: "container_process",
       },
+      adapterType: "hermes_local",
       image: "paperclip-server:latest",
       command: ["hermes", "chat"],
       workingDir: "/workspace",
       workspacePath: "/workspace",
+      nativeHomePath: "/home/hermes/.hermes",
+      nativeSkillsPath: "/home/hermes/.hermes/skills",
       agentHomePath: "/home/hermes/.hermes",
       sharedAuthSourcePath: "/paperclip/shared/hermes-home-source",
       runtimeBundleRoot: "/workspace/.paperclip/runtime",
@@ -142,6 +145,18 @@ const run: HeartbeatRun = {
             scope: "issue",
             source: "issue.description",
             content: "Validate the Hermes container launch contract.",
+          },
+        ],
+      },
+      managedSkills: {
+        skillsDir: "/workspace/.paperclip/runtime/skills",
+        entries: [
+          {
+            name: "managed-skill",
+            sourceType: "company",
+            sourceLabel: "company",
+            managedSkillId: "skill-1",
+            scopeId: "company-1",
           },
         ],
       },
@@ -249,6 +264,34 @@ const run: HeartbeatRun = {
         reused: false,
       },
     ],
+    paperclipRuntimeObservability: {
+      adapterContainerProfile: {
+        adapterType: "hermes_local",
+        serviceName: "hermes-worker",
+        runnerProvider: "hermes_container",
+        browserCapable: false,
+      },
+      runtimeChannel: "stable",
+      runtimeVersion: "2026.03.31",
+      executionWorkspaceMode: "isolated_workspace",
+      nativeHomeRoot: "/home/hermes/.hermes",
+      nativeSkillsProjection: {
+        nativeSkillsPath: "/home/hermes/.hermes/skills",
+        managedSkillsDir: "/workspace/.paperclip/runtime/skills",
+        managedSkillCount: 1,
+      },
+      companySharedStateRoot: "/paperclip/companies/company-1/shared",
+      runtimeService: {
+        serviceName: "hermes-worker",
+        provider: "hermes_container",
+        providerRef: "container-1234567890abcdef",
+      },
+      heartbeatTimestampConsistency: {
+        runStartedAt: "2026-03-24T12:00:00.000Z",
+        agentLastHeartbeatAt: "2026-03-24T12:00:00.000Z",
+        matchesRunStartedAt: true,
+      },
+    },
   },
   createdAt: new Date("2026-03-24T12:00:00.000Z"),
   updatedAt: new Date("2026-03-24T12:00:00.000Z"),
@@ -273,6 +316,13 @@ describe("RunRuntimeContractCard", () => {
     expect(html).toContain("Swarm subtask subtask-1 forced into an isolated workspace");
     expect(html).toContain("Runtime Services");
     expect(html).toContain("container-12345678");
+    expect(html).toContain("Runtime Observability");
+    expect(html).toContain("Stable");
+    expect(html).toContain("2026.03.31");
+    expect(html).toContain("Native Skills Projection");
+    expect(html).toContain("/paperclip/companies/company-1/shared");
+    expect(html).toContain("Heartbeat Timestamp Consistency");
+    expect(html).toContain("Matches run start");
   });
 
   it("returns no markup when the run has no surfaced runtime contract", () => {

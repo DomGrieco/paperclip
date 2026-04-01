@@ -49,6 +49,14 @@ function createUpdateMockDb(existingRow: Record<string, unknown>, updatedRow = e
   };
 }
 
+function createListMockDb(rows: Array<Record<string, unknown>>) {
+  const orderBy = vi.fn(async () => rows);
+  const where = vi.fn(() => ({ orderBy }));
+  const from = vi.fn(() => ({ where }));
+  const select = vi.fn(() => ({ from }));
+  return { db: { select } as any, select, where, orderBy };
+}
+
 describe("sharedContextService.create", () => {
   it("downgrades agent company-wide publications to proposed governance state", async () => {
     const row = createRow({ visibility: "company", status: "proposed", projectId: null });
@@ -102,6 +110,35 @@ describe("sharedContextService.create", () => {
       }),
     );
     expect(result.status).toBe("published");
+  });
+});
+
+describe("sharedContextService.listAuthorized", () => {
+  it("lets board actors see proposed, published, and archived publications", async () => {
+    const { db } = createListMockDb([
+      createRow({ id: "published-1", status: "published" }),
+      createRow({ id: "proposed-1", status: "proposed", sourceAgentId: "agent-2" }),
+      createRow({ id: "archived-1", status: "archived", sourceAgentId: "agent-3" }),
+    ]);
+    const svc = sharedContextService(db);
+
+    const result = await svc.listAuthorized("company-1", {}, { type: "board" });
+
+    expect(result.map((item) => item.id)).toEqual(["published-1", "proposed-1", "archived-1"]);
+  });
+
+  it("limits agent views to published items plus their own proposals", async () => {
+    const { db } = createListMockDb([
+      createRow({ id: "published-1", status: "published", sourceAgentId: "agent-9" }),
+      createRow({ id: "own-proposal", status: "proposed", sourceAgentId: "agent-1" }),
+      createRow({ id: "other-proposal", status: "proposed", sourceAgentId: "agent-2" }),
+      createRow({ id: "archived-1", status: "archived", sourceAgentId: "agent-1" }),
+    ]);
+    const svc = sharedContextService(db);
+
+    const result = await svc.listAuthorized("company-1", {}, { type: "agent", agentId: "agent-1" });
+
+    expect(result.map((item) => item.id)).toEqual(["published-1", "own-proposal"]);
   });
 });
 

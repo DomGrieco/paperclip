@@ -277,6 +277,135 @@ describe("run graph schema contract", () => {
     ]);
   }, 20_000);
 
+  it("filters governed issue shared context for agent actors while preserving board visibility", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [ownerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Hermes Engineer",
+      role: "engineer",
+      adapterType: "hermes_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [otherAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Hermes QA",
+      role: "qa",
+      adapterType: "hermes_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Govern shared context visibility",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: ownerAgent.id,
+    }).returning();
+
+    await db.insert(sharedContextPublications).values([
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: ownerAgent.id,
+        createdByRunId: null,
+        title: "Published note",
+        summary: null,
+        body: "Visible to everyone on the issue.",
+        tags: ["published"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "published",
+        freshness: "recent",
+        freshnessAt: new Date("2026-03-25T10:00:00.000Z"),
+        confidence: null,
+        rank: 1,
+        provenance: { source: "test" },
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: ownerAgent.id,
+        createdByRunId: null,
+        title: "Owner draft",
+        summary: null,
+        body: "Only the authoring agent and board should see this proposal.",
+        tags: ["proposal"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "proposed",
+        freshness: "live",
+        freshnessAt: new Date("2026-03-25T10:05:00.000Z"),
+        confidence: null,
+        rank: 2,
+        provenance: { source: "test" },
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: otherAgent.id,
+        createdByRunId: null,
+        title: "Other agent draft",
+        summary: null,
+        body: "Should stay hidden from peer agents until published.",
+        tags: ["proposal"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "proposed",
+        freshness: "live",
+        freshnessAt: new Date("2026-03-25T10:10:00.000Z"),
+        confidence: null,
+        rank: 3,
+        provenance: { source: "test" },
+      },
+      {
+        companyId: company.id,
+        issueId: issue.id,
+        sourceAgentId: otherAgent.id,
+        createdByRunId: null,
+        title: "Archived note",
+        summary: null,
+        body: "Board-only historical context.",
+        tags: ["archived"],
+        visibility: "issue",
+        audienceAgentIds: [],
+        status: "archived",
+        freshness: "stale",
+        freshnessAt: new Date("2026-03-25T09:55:00.000Z"),
+        confidence: null,
+        rank: 4,
+        provenance: { source: "test" },
+      },
+    ]);
+
+    const boardSummary = await graph.getIssueSummary(issue.id, { type: "board" });
+    const ownerSummary = await graph.getIssueSummary(issue.id, { type: "agent", agentId: ownerAgent.id });
+    const peerSummary = await graph.getIssueSummary(issue.id, { type: "agent", agentId: otherAgent.id });
+
+    expect(boardSummary.issueSharedContextPublications.map((item) => item.title)).toEqual([
+      "Other agent draft",
+      "Owner draft",
+      "Published note",
+      "Archived note",
+    ]);
+    expect(ownerSummary.issueSharedContextPublications.map((item) => item.title)).toEqual([
+      "Owner draft",
+      "Published note",
+    ]);
+    expect(peerSummary.issueSharedContextPublications.map((item) => item.title)).toEqual([
+      "Other agent draft",
+      "Published note",
+    ]);
+  }, 20_000);
+
   it("persists validated swarm plans on planner roots and bounded subtask packets on workers", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);
@@ -388,6 +517,87 @@ describe("run graph schema contract", () => {
         swarmSubtaskKind: "research",
       }),
     );
+  }, 20_000);
+
+  it("assigns planned sibling workers to distinct worker-capable agents when available", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+    const graph = issueRunGraphService(db);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [plannerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "CEO Planner",
+      role: "ceo",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [engineerAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "Engineer Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [qaAgent] = await db.insert(agents).values({
+      companyId: company.id,
+      name: "QA Worker",
+      role: "qa",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      title: "Parallel sibling execution",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: plannerAgent.id,
+    }).returning();
+
+    const planner = await graph.startPlannerRoot(issue.id, plannerAgent.id);
+    await graph.attachSwarmPlan(planner.id, {
+      version: "v1",
+      plannerRunId: planner.id,
+      generatedAt: "2026-03-30T01:00:00.000Z",
+      subtasks: [
+        {
+          id: "implement-fix",
+          kind: "implementation",
+          title: "Implement the runtime fix",
+          goal: "Patch the runtime behavior.",
+          taskKey: "implement-fix",
+          expectedArtifacts: [{ kind: "patch", required: true }],
+          acceptanceChecks: ["Code change committed in worker branch."],
+          recommendedModelTier: "balanced",
+        },
+        {
+          id: "verify-fix",
+          kind: "verification",
+          title: "Verify the runtime fix",
+          goal: "Run browser and test validation for the patch.",
+          taskKey: "verify-fix",
+          expectedArtifacts: [{ kind: "test_result", required: true }],
+          acceptanceChecks: ["Validation cites concrete results."],
+          recommendedModelTier: "balanced",
+        },
+      ],
+    });
+
+    const workers = await graph.materializePlannedWorkers(planner.id);
+
+    expect(workers).toHaveLength(2);
+    expect(workers.map((worker) => worker.agentId).sort()).toEqual(
+      [engineerAgent.id, qaAgent.id].sort(),
+    );
+    expect(workers.every((worker) => worker.agentId !== plannerAgent.id)).toBe(true);
   }, 20_000);
 
   it("queues a repair worker when verification returns repair and retries remain", async () => {

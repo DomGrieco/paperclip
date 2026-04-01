@@ -43,6 +43,28 @@ const orchestration: IssueOrchestrationSummary = {
       createdAt: new Date("2026-03-24T19:20:00.000Z"),
       updatedAt: new Date("2026-03-24T19:30:00.000Z"),
     },
+    {
+      id: "pub-2",
+      companyId: "company-1",
+      projectId: null,
+      issueId: "issue-1",
+      sourceAgentId: "agent-shared-9999",
+      createdByRunId: "run-shared-1111",
+      title: "Promote bundle guidance",
+      summary: "Board should publish this finding into the governed recall set.",
+      body: "This proposal should be visible with an explicit publish action.",
+      tags: ["governance"],
+      visibility: "issue",
+      audienceAgentIds: [],
+      status: "proposed",
+      freshness: "live",
+      freshnessAt: "2026-03-24T19:35:00.000Z",
+      confidence: null,
+      rank: 2,
+      provenance: { source: "agent_proposal" },
+      createdAt: new Date("2026-03-24T19:34:00.000Z"),
+      updatedAt: new Date("2026-03-24T19:35:00.000Z"),
+    },
   ],
   nodes: [
     {
@@ -147,6 +169,8 @@ describe("IssueRunGraphCard", () => {
                   ["run-work", "/agents/agent-work/runs/run-work"],
                   ["run-verify", "/agents/agent-verify/runs/run-verify"],
                 ])}
+                onPublishSharedContext={() => {}}
+                onArchiveSharedContext={() => {}}
               />
             }
           />
@@ -177,6 +201,9 @@ describe("IssueRunGraphCard", () => {
     expect(html).toContain("Freshness Recent");
     expect(html).toContain("Confidence 91%");
     expect(html).toContain("#hermes");
+    expect(html).toContain("Promote bundle guidance");
+    expect(html).toContain("Publish to shared recall");
+    expect(html).toContain("Archive context");
   });
 
   it("renders evaluator summary and artifact evidence details", () => {

@@ -23,6 +23,8 @@ export {
   portabilitySecretRequirementSchema,
   portabilityCompanyManifestEntrySchema,
   portabilityAgentManifestEntrySchema,
+  portabilityManagedSkillScopeManifestEntrySchema,
+  portabilityManagedSkillManifestEntrySchema,
   portabilityManifestSchema,
   portabilitySourceSchema,
   portabilityTargetSchema,
@@ -114,6 +116,21 @@ export {
   type CreateSharedContextPublication,
   type UpdateSharedContextPublication,
 } from "./shared-context.js";
+
+export {
+  managedSkillStatusSchema,
+  managedSkillScopeTypeSchema,
+  createManagedSkillSchema,
+  updateManagedSkillSchema,
+  managedSkillScopeAssignmentInputSchema,
+  putManagedSkillScopesSchema,
+  managedSkillEffectivePreviewQuerySchema,
+  type CreateManagedSkill,
+  type UpdateManagedSkill,
+  type ManagedSkillScopeAssignmentInput,
+  type PutManagedSkillScopes,
+  type ManagedSkillEffectivePreviewQuery,
+} from "./managed-skill.js";
 
 export {
   swarmSubtaskKindSchema,

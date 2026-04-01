@@ -1,4 +1,5 @@
 import type { RuntimeBundleRunner } from "@paperclipai/shared";
+import { maybeGetAgentContainerProfile } from "./agent-container-profiles.js";
 import type { RuntimeServiceRef } from "./workspace-runtime.js";
 
 export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unknown> | null): RuntimeBundleRunner {
@@ -7,9 +8,17 @@ export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unkno
       ? (projectPolicy.workspaceStrategy as Record<string, unknown>)
       : null;
   const defaultMode =
-    projectPolicy && typeof projectPolicy.defaultMode === "string" ? (projectPolicy.defaultMode as string) : null;
+    projectPolicy && typeof projectPolicy.defaultMode === "string"
+      ? (projectPolicy.defaultMode as string)
+      : projectPolicy && typeof projectPolicy.executionMode === "string"
+        ? (projectPolicy.executionMode as string)
+        : null;
   const strategyType =
-    workspaceStrategy && typeof workspaceStrategy.type === "string" ? (workspaceStrategy.type as string) : null;
+    workspaceStrategy && typeof workspaceStrategy.type === "string"
+      ? (workspaceStrategy.type as string)
+      : projectPolicy && typeof projectPolicy.workspaceStrategyType === "string"
+        ? (projectPolicy.workspaceStrategyType as string)
+        : null;
 
   if (strategyType === "cloud_sandbox") {
     return {
@@ -46,6 +55,33 @@ export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unkno
   };
 }
 
+export function applyPlannedRunnerOverride(input: {
+  planned: RuntimeBundleRunner;
+  override?: Pick<RuntimeBundleRunner, "target" | "provider" | "browserCapable" | "sandboxed" | "isolationBoundary"> | null;
+}): RuntimeBundleRunner {
+  if (!input.override) return input.planned;
+  return {
+    ...input.planned,
+    ...input.override,
+  };
+}
+
+export function resolveContainerRunnerOverride(input: {
+  adapterType: string;
+  launcherEnabled: boolean;
+}): Pick<RuntimeBundleRunner, "target" | "provider" | "browserCapable" | "sandboxed" | "isolationBoundary"> | null {
+  if (!input.launcherEnabled) return null;
+  const profile = maybeGetAgentContainerProfile(input.adapterType);
+  if (!profile) return null;
+  return {
+    target: profile.runnerProvider,
+    provider: profile.runnerProvider,
+    browserCapable: profile.browserCapable,
+    sandboxed: true,
+    isolationBoundary: "container_process",
+  };
+}
+
 export function resolveObservedRunnerSnapshot(input: {
   planned: RuntimeBundleRunner;
   runtimeServices?: RuntimeServiceRef[] | null;
@@ -59,6 +95,19 @@ export function resolveObservedRunnerSnapshot(input: {
       workspaceStrategyType: input.planned.workspaceStrategyType,
       executionMode: input.planned.executionMode,
       browserCapable: hermesContainers.some((service) => Boolean(service.url)),
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    };
+  }
+
+  const agentContainers = services.filter((service) => service.provider === "agent_container");
+  if (agentContainers.length > 0) {
+    return {
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: input.planned.workspaceStrategyType,
+      executionMode: input.planned.executionMode,
+      browserCapable: agentContainers.some((service) => Boolean(service.url)),
       sandboxed: true,
       isolationBoundary: "container_process",
     };

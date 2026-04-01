@@ -1,4 +1,4 @@
-import type { PaperclipSharedContextPacket, RuntimeBundle } from "@paperclipai/shared";
+import type { PaperclipSharedContextManagedSkill, PaperclipSharedContextPacket, RuntimeBundle } from "@paperclipai/shared";
 
 export function buildPaperclipSharedContextPacket(input: {
   runtimeBundle: RuntimeBundle;
@@ -6,6 +6,8 @@ export function buildPaperclipSharedContextPacket(input: {
   runtimeBundleRoot: string | null;
   runtimeInstructionsPath: string | null;
   sharedContextPath: string | null;
+  managedSkillsDir?: string | null;
+  managedSkills?: PaperclipSharedContextManagedSkill[] | null;
 }): PaperclipSharedContextPacket {
   return {
     version: "v1",
@@ -20,6 +22,10 @@ export function buildPaperclipSharedContextPacket(input: {
     runner: input.runtimeBundle.runner,
     verification: input.runtimeBundle.verification,
     memory: input.runtimeBundle.memory,
+    managedSkills: {
+      skillsDir: input.managedSkillsDir ?? null,
+      entries: input.managedSkills ?? [],
+    },
     provenance: {
       source: "runtime_bundle",
       workspaceCwd: input.workspaceCwd,

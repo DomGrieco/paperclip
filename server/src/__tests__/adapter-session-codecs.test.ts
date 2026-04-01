@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sessionCodec as claudeSessionCodec } from "@paperclipai/adapter-claude-local/server";
-import { sessionCodec as codexSessionCodec, isCodexUnknownSessionError } from "@paperclipai/adapter-codex-local/server";
+import { sessionCodec as codexSessionCodec, isCodexTransientServerError, isCodexUnknownSessionError } from "@paperclipai/adapter-codex-local/server";
 import {
   sessionCodec as cursorSessionCodec,
   isCursorUnknownSessionError,
@@ -122,6 +122,29 @@ describe("codex resume recovery detection", () => {
     ).toBe(true);
     expect(
       isCodexUnknownSessionError(
+        "",
+        "stderrError: thread/resume: thread/resume failed: no rollout found for thread id 019d0932-e047-7db1-a7fd-f885f9980bf8",
+      ),
+    ).toBe(true);
+    expect(
+      isCodexUnknownSessionError(
+        '{"type":"result","ok":true}',
+        "",
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("codex transient upstream detection", () => {
+  it("detects websocket 500 errors from codex output", () => {
+    expect(
+      isCodexTransientServerError(
+        "",
+        "2026-04-01T03:32:01.115387Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses",
+      ),
+    ).toBe(true);
+    expect(
+      isCodexTransientServerError(
         '{"type":"result","ok":true}',
         "",
       ),

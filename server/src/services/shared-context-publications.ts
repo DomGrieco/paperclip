@@ -11,6 +11,18 @@ import type {
 } from "@paperclipai/shared";
 import { forbidden, notFound, unprocessable } from "../errors.js";
 
+type SharedContextListFilters = {
+  projectId?: string;
+  issueId?: string;
+  sourceAgentId?: string;
+  status?: SharedContextPublicationStatus;
+  visibility?: SharedContextPublicationVisibility;
+};
+
+type SharedContextListActor =
+  | { type: "board" }
+  | { type: "agent"; agentId?: string | null };
+
 function mapPublication(row: typeof sharedContextPublications.$inferSelect): SharedContextPublication {
   return {
     id: row.id,
@@ -91,6 +103,19 @@ function toRuntimeSnippet(
   };
 }
 
+function filterPublicationsForActor(
+  publications: SharedContextPublication[],
+  actor: SharedContextListActor,
+): SharedContextPublication[] {
+  if (actor.type === "board") return publications;
+  const actorAgentId = actor.agentId ?? null;
+  return publications.filter((publication) => {
+    if (publication.status === "published") return true;
+    if (publication.status !== "proposed") return false;
+    return Boolean(actorAgentId) && publication.sourceAgentId === actorAgentId;
+  });
+}
+
 export function sharedContextService(db: Db) {
   return {
     async create(
@@ -133,13 +158,7 @@ export function sharedContextService(db: Db) {
 
     async list(
       companyId: string,
-      filters: {
-        projectId?: string;
-        issueId?: string;
-        sourceAgentId?: string;
-        status?: SharedContextPublicationStatus;
-        visibility?: SharedContextPublicationVisibility;
-      } = {},
+      filters: SharedContextListFilters = {},
     ): Promise<SharedContextPublication[]> {
       const conditions = [eq(sharedContextPublications.companyId, companyId)];
       if (filters.projectId) conditions.push(eq(sharedContextPublications.projectId, filters.projectId));
@@ -153,6 +172,15 @@ export function sharedContextService(db: Db) {
         .where(and(...conditions))
         .orderBy(desc(sharedContextPublications.freshnessAt), desc(sharedContextPublications.updatedAt));
       return rows.map(mapPublication);
+    },
+
+    async listAuthorized(
+      companyId: string,
+      filters: SharedContextListFilters = {},
+      actor: SharedContextListActor,
+    ): Promise<SharedContextPublication[]> {
+      const publications = await this.list(companyId, filters);
+      return filterPublicationsForActor(publications, actor);
     },
 
     async listRuntimeMemorySnippets(input: {

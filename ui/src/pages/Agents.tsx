@@ -59,6 +59,12 @@ function filterOrgTree(nodes: OrgNode[], tab: FilterTab, showTerminated: boolean
   }, []);
 }
 
+function lastAgentTouchLabel(agent: Agent): string {
+  if (agent.lastWakeupRequestedAt) return `Wake ${relativeTime(agent.lastWakeupRequestedAt)}`;
+  if (agent.lastHeartbeatAt) return `HB ${relativeTime(agent.lastHeartbeatAt)}`;
+  return "—";
+}
+
 export function Agents() {
   const { selectedCompanyId } = useCompany();
   const { openNewAgent } = useDialog();
@@ -261,8 +267,11 @@ export function Agents() {
                       <span className="text-xs text-muted-foreground font-mono w-14 text-right">
                         {adapterLabels[agent.adapterType] ?? agent.adapterType}
                       </span>
-                      <span className="text-xs text-muted-foreground w-16 text-right">
-                        {agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : "—"}
+                      <span
+                        className="text-xs text-muted-foreground w-24 text-right"
+                        title={agent.lastWakeupRequestedAt ? "Latest wakeup request" : agent.lastHeartbeatAt ? "Latest run heartbeat" : undefined}
+                      >
+                        {lastAgentTouchLabel(agent)}
                       </span>
                       <span className="w-20 flex justify-end">
                         <StatusBadge status={agent.status} />
@@ -362,8 +371,11 @@ function OrgTreeNode({
                 <span className="text-xs text-muted-foreground font-mono w-14 text-right">
                   {adapterLabels[agent.adapterType] ?? agent.adapterType}
                 </span>
-                <span className="text-xs text-muted-foreground w-16 text-right">
-                  {agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : "—"}
+                <span
+                  className="text-xs text-muted-foreground w-24 text-right"
+                  title={agent.lastWakeupRequestedAt ? "Latest wakeup request" : agent.lastHeartbeatAt ? "Latest run heartbeat" : undefined}
+                >
+                  {lastAgentTouchLabel(agent)}
                 </span>
               </>
             )}

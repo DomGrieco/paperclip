@@ -1,4 +1,4 @@
-export { execute } from "./execute.js";
+export { execute, ensureGeminiSkillsInjected } from "./execute.js";
 export { testEnvironment } from "./test.js";
 export {
   parseGeminiJsonl,

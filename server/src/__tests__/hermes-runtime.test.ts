@@ -128,6 +128,13 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       ].join("\n"),
       "utf8",
     );
+    const managedSkillsDir = path.join(cwd, ".paperclip", "runtime", "skills");
+    await fs.mkdir(path.join(managedSkillsDir, "managed-skill"), { recursive: true });
+    await fs.writeFile(
+      path.join(managedSkillsDir, "managed-skill", "SKILL.md"),
+      "---\nname: managed-skill\ndescription: Managed runtime skill\n---\n\n# managed\n",
+      "utf8",
+    );
     const nextConfig = await prepareHermesAdapterConfigForExecution({
       config: {
         model: "anthropic/claude-sonnet-4",
@@ -137,6 +144,16 @@ describe("prepareHermesAdapterConfigForExecution", () => {
       companyId: "company-1",
       managedHome: path.join(cwd, "company-hermes-home"),
       runtimeBundle: makeBundle(),
+      managedSkillsDir,
+      managedSkills: [
+        {
+          name: "managed-skill",
+          sourceType: "company",
+          sourceLabel: "company",
+          managedSkillId: "skill-1",
+          scopeId: "company-1",
+        },
+      ],
       authToken: "jwt-token-123",
       managedRuntime: makeManagedRuntime(cwd),
     });
@@ -152,6 +169,8 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(env.PAPERCLIP_SHARED_CONTEXT_PATH).toContain(path.join(".paperclip", "context", "shared-context.json"));
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"version\":\"v1\"");
     expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"issueId\":\"issue-1\"");
+    expect(env.PAPERCLIP_SHARED_CONTEXT_JSON).toContain("\"managedSkills\"");
+    expect(env.PAPERCLIP_SKILLS_DIR).toBe(managedSkillsDir);
     expect(env.HERMES_HOME).toContain(path.join("company-hermes-home"));
     expect(env.PAPERCLIP_HERMES_SHARED_HOME_SOURCE).toBeUndefined();
     expect(env.PAPERCLIP_HERMES_MANAGED_RUNTIME_VERSION).toBe("Hermes Agent v9.9.9");
@@ -185,6 +204,16 @@ describe("prepareHermesAdapterConfigForExecution", () => {
         workspaceCwd: string;
       };
       memory: RuntimeBundle["memory"];
+      managedSkills?: {
+        skillsDir: string | null;
+        entries: Array<{
+          name: string;
+          sourceType: string;
+          sourceLabel: string;
+          managedSkillId: string | null;
+          scopeId: string | null;
+        }>;
+      };
     };
     expect(sharedContext.version).toBe("v1");
     expect(sharedContext.scope.companyId).toBe("company-1");
@@ -193,15 +222,31 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(sharedContext.provenance.source).toBe("runtime_bundle");
     expect(sharedContext.provenance.workspaceCwd).toBe(cwd);
     expect(sharedContext.memory.snippets).toHaveLength(1);
+    expect(sharedContext.managedSkills).toEqual({
+      skillsDir: managedSkillsDir,
+      entries: [
+        {
+          name: "managed-skill",
+          sourceType: "company",
+          sourceLabel: "company",
+          managedSkillId: "skill-1",
+          scopeId: "company-1",
+        },
+      ],
+    });
 
     const copiedAuth = await fs.readFile(path.join(env.HERMES_HOME, "auth.json"), "utf8");
     const copiedEnv = await fs.readFile(path.join(env.HERMES_HOME, ".env"), "utf8");
     const copiedConfig = await fs.readFile(path.join(env.HERMES_HOME, "config.yaml"), "utf8");
+    const skillsDirStats = await fs.lstat(path.join(env.HERMES_HOME, "skills"));
+    const projectedSkill = await fs.readFile(path.join(env.HERMES_HOME, "skills", "managed-skill", "SKILL.md"), "utf8");
 
     expect(copiedAuth).toContain("openai-codex");
-    expect(copiedEnv).toContain("OPENAI_API_KEY=test-key");
+    expect(copiedEnv).toContain("OPENAI_API_KEY=");
     expect(copiedEnv).not.toContain("TERMINAL_CWD=/Users/eru");
-    expect(copiedConfig).toContain("terminal:");
+    expect(skillsDirStats.isDirectory() || skillsDirStats.isSymbolicLink()).toBe(true);
+    expect(projectedSkill).toContain("name: managed-skill");
+
     expect(copiedConfig).toContain("timeout: 300");
     expect(copiedConfig).not.toContain("cwd: /Users/eru");
     expect(copiedConfig).not.toContain("working_dir: /Users/eru");
@@ -442,6 +487,58 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(promptTemplate).toContain("Check your assigned todo issues");
   });
 
+  it("appends a worker completion contract when the runtime bundle identifies a swarm worker subtask", async () => {
+    const cwd = await makeTempDir();
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {},
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        run: {
+          id: "run-worker-2",
+          runType: "worker",
+          rootRunId: "run-planner-1",
+          parentRunId: "run-planner-1",
+          graphDepth: 1,
+          repairAttempt: 0,
+          verificationVerdict: null,
+        },
+        swarm: {
+          plan: null,
+          currentSubtask: {
+            id: "verify-overlap",
+            kind: "verification",
+            title: "Verify overlap evidence",
+            goal: "Produce concrete overlap validation evidence.",
+            taskKey: "verify-overlap",
+            ownershipMode: "read_only",
+            acceptanceChecks: ["Evidence cites both worker ids"],
+            expectedArtifacts: [
+              { kind: "test_result", required: true },
+              { kind: "comment", required: true },
+            ],
+            recommendedModelTier: "balanced",
+            budgetCents: 25,
+            maxRuntimeSec: 900,
+          },
+        },
+      }),
+      authToken: null,
+      managedRuntime: makeManagedRuntime(cwd),
+    });
+
+    const promptTemplate = String(nextConfig.promptTemplate);
+    expect(promptTemplate).toContain("## Worker completion contract");
+    expect(promptTemplate).toContain("swarm worker for subtask `verify-overlap`");
+    expect(promptTemplate).toContain("Required expected artifacts for this subtask: [{\"kind\":\"test_result\",\"required\":true},{\"kind\":\"comment\",\"required\":true}]");
+    expect(promptTemplate).toContain("Acceptance checks for this subtask: [\"Evidence cites both worker ids\"]");
+    expect(promptTemplate).toContain("PAPERCLIP_RESULT_JSON_START");
+    expect(promptTemplate).toContain("\"childOutput\"");
+    expect(promptTemplate).toContain("artifactClaims");
+    expect(promptTemplate).toContain("Allowed child output status values are exactly `completed` or `blocked`");
+  });
+
   it("materializes a governed helper policy for validation-shaped issue runs", async () => {
     const cwd = await makeTempDir();
     const sharedSource = await makeTempDir();
@@ -508,6 +605,55 @@ describe("prepareHermesAdapterConfigForExecution", () => {
     expect(helper).toContain("request not allowed by governed helper policy");
     expect(helper).toContain("request exceeds governed helper policy budget");
     expect(String(nextConfig.promptTemplate)).toContain("PAPERCLIP_API_POLICY_SUMMARY");
+  });
+
+  it("does not govern fan-out validation issues that explicitly require worker/reviewer proof", async () => {
+    const cwd = await makeTempDir();
+    const sharedSource = await makeTempDir();
+    await fs.writeFile(
+      path.join(sharedSource, "auth.json"),
+      JSON.stringify({ active_provider: "openai-codex" }) + "\n",
+      "utf8",
+    );
+    const nextConfig = await prepareHermesAdapterConfigForExecution({
+      config: {
+        env: {
+          PAPERCLIP_HERMES_SHARED_HOME_SOURCE: sharedSource,
+        },
+      },
+      cwd,
+      companyId: "company-1",
+      managedHome: path.join(cwd, "company-hermes-home"),
+      runtimeBundle: makeBundle({
+        issue: {
+          id: "issue-88",
+          identifier: "PAP-88",
+          title: "Worker artifact acceptance regression validation rerun",
+          status: "in_progress",
+          priority: "high",
+        },
+        memory: {
+          snippets: [
+            {
+              scope: "issue",
+              source: "issue.description",
+              sourceId: "issue-88",
+              content:
+                "Acceptance criteria: planner fans out into child runs, worker childOutput artifactClaims are persisted as reviewable artifacts, at least one reviewerDecision is accept, and planner synthesis cites accepted child outputs/artifacts.",
+              freshness: "static",
+              updatedAt: "2026-03-24T00:00:00.000Z",
+              rank: 1,
+            },
+          ],
+        },
+      }),
+      authToken: "jwt-token-888",
+      managedRuntime: makeManagedRuntime(cwd),
+    });
+
+    const env = nextConfig.env as Record<string, string>;
+    expect(env.PAPERCLIP_API_POLICY_JSON).toBeUndefined();
+    expect(env.PAPERCLIP_API_POLICY_SUMMARY).toBeUndefined();
   });
 
   it("clears stale runtime bundle artifacts when a heartbeat run has no runtime bundle", async () => {

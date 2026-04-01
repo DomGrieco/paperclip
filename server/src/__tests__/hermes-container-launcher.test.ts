@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildContainerName,
   buildDockerBindsFromPlan,
   buildHermesContainerDockerArgs,
   injectHermesContainerLauncherService,
@@ -107,6 +108,15 @@ describe("hermes-container-launcher", () => {
     expect(args).toContain("HERMES_HOME=/home/hermes/.hermes");
   });
 
+  it("uses distinct container name prefixes for Hermes and generic agent containers", () => {
+    expect(buildContainerName({ runId: "run-1", serviceId: "service-1", provider: "hermes_container" })).toContain(
+      "paperclip-hermes-",
+    );
+    expect(buildContainerName({ runId: "run-1", serviceId: "service-1", provider: "agent_container" })).toContain(
+      "paperclip-agent-",
+    );
+  });
+
   it("resolves a bind-mount source from a source container mount table", () => {
     expect(
       resolveMountSourcePath({
@@ -170,6 +180,7 @@ describe("hermes-container-launcher", () => {
         mounts: [
           { kind: "workspace", hostPath: "/paperclip/instances/default/workspaces/agent-1", containerPath: "/workspace", readOnly: false, purpose: "workspace" },
           { kind: "agent_home", hostPath: "/paperclip/instances/default/companies/company-1/hermes-home", containerPath: "/home/hermes/.hermes", readOnly: false, purpose: "managed home" },
+          { kind: "managed_runtime", hostPath: "/paperclip/instances/default/runtime-cache/hermes/channels/stable/installs/current", containerPath: "/paperclip/runtime/hermes-managed", readOnly: true, purpose: "managed runtime" },
           { kind: "shared_auth", hostPath: "/paperclip/shared/hermes-home-source", containerPath: "/paperclip/shared/hermes-home-source", readOnly: true, purpose: "bootstrap source" },
         ],
         env: [],
@@ -184,6 +195,8 @@ describe("hermes-container-launcher", () => {
     expect(binds).toEqual([
       "/var/lib/docker/volumes/paperclip-data/_data/instances/default/workspaces/agent-1:/workspace",
       "/var/lib/docker/volumes/paperclip-data/_data/instances/default/companies/company-1/hermes-home:/home/hermes/.hermes",
+      "/var/lib/docker/volumes/paperclip-data/_data/instances/default/runtime-cache/hermes/channels/stable/installs/current:/paperclip/runtime/hermes-managed:ro",
+      "/var/lib/docker/volumes/paperclip-data/_data/instances/default/runtime-cache/hermes/channels/stable/installs/current:/paperclip/instances/default/runtime-cache/hermes/channels/stable/installs/current:ro",
       "/Users/eru/.hermes:/paperclip/shared/hermes-home-source:ro",
     ]);
   });

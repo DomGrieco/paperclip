@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolveObservedRunnerSnapshot, resolvePlannedRunnerSnapshot } from "../services/runner-plane.js";
+import {
+  applyPlannedRunnerOverride,
+  resolveContainerRunnerOverride,
+  resolveObservedRunnerSnapshot,
+  resolvePlannedRunnerSnapshot,
+} from "../services/runner-plane.js";
 
 describe("runner-plane", () => {
   it("derives a planned local-host runner snapshot by default", () => {
@@ -28,6 +33,64 @@ describe("runner-plane", () => {
       browserCapable: true,
       sandboxed: true,
       isolationBoundary: "cloud_sandbox",
+    });
+  });
+
+  it("accepts normalized execution mode and strategy inputs from composed workspace policy", () => {
+    expect(
+      resolvePlannedRunnerSnapshot({
+        executionMode: "isolated_workspace",
+        workspaceStrategyType: "git_worktree",
+      }),
+    ).toEqual({
+      target: "local_host",
+      provider: "local_process",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: false,
+      isolationBoundary: "host_process",
+    });
+  });
+
+  it("resolves a container runner override for managed runtime adapters only when launcher mode is enabled", () => {
+    expect(resolveContainerRunnerOverride({ adapterType: "codex_local", launcherEnabled: false })).toBeNull();
+    expect(resolveContainerRunnerOverride({ adapterType: "codex_local", launcherEnabled: true })).toEqual({
+      target: "agent_container",
+      provider: "agent_container",
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+    expect(resolveContainerRunnerOverride({ adapterType: "hermes_local", launcherEnabled: true })).toEqual({
+      target: "hermes_container",
+      provider: "hermes_container",
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+    expect(resolveContainerRunnerOverride({ adapterType: "opencode_local", launcherEnabled: true })).toBeNull();
+  });
+
+  it("applies planned runner overrides while preserving workspace policy metadata", () => {
+    const planned = resolvePlannedRunnerSnapshot({
+      defaultMode: "isolated_workspace",
+      workspaceStrategy: { type: "git_worktree" },
+    });
+
+    expect(
+      applyPlannedRunnerOverride({
+        planned,
+        override: resolveContainerRunnerOverride({ adapterType: "cursor", launcherEnabled: true }),
+      }),
+    ).toEqual({
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "container_process",
     });
   });
 
@@ -128,6 +191,57 @@ describe("runner-plane", () => {
       workspaceStrategyType: "git_worktree",
       executionMode: "isolated_workspace",
       browserCapable: true,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+  });
+
+  it("upgrades the observed runner snapshot for generic agent container runtime services", () => {
+    const planned = resolvePlannedRunnerSnapshot({
+      defaultMode: "isolated_workspace",
+      workspaceStrategy: { type: "git_worktree" },
+    });
+
+    expect(
+      resolveObservedRunnerSnapshot({
+        planned,
+        runtimeServices: [
+          {
+            id: "svc-2",
+            companyId: "company-1",
+            projectId: null,
+            projectWorkspaceId: null,
+            executionWorkspaceId: null,
+            issueId: null,
+            serviceName: "cursor-worker",
+            status: "running",
+            lifecycle: "ephemeral",
+            scopeType: "run",
+            scopeId: "run-2",
+            reuseKey: null,
+            command: null,
+            cwd: null,
+            port: null,
+            url: null,
+            provider: "agent_container",
+            providerRef: "cursor-ctr-1",
+            ownerAgentId: null,
+            startedByRunId: "run-2",
+            lastUsedAt: new Date().toISOString(),
+            startedAt: new Date().toISOString(),
+            stoppedAt: null,
+            stopPolicy: null,
+            healthStatus: "healthy",
+            reused: false,
+          },
+        ],
+      }),
+    ).toEqual({
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
       sandboxed: true,
       isolationBoundary: "container_process",
     });

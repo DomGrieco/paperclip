@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { heartbeatRuns, issues } from "@paperclipai/db";
+import { agents, heartbeatRuns, issues } from "@paperclipai/db";
 import {
   swarmPlanSchema,
   swarmSubtaskSchema,
@@ -39,6 +39,62 @@ type SpawnWorkerInput = {
 type PlannerGraphMetadata = Pick<HeartbeatRun, "runType" | "rootRunId" | "parentRunId" | "graphDepth"> & {
   root: HeartbeatRunRow;
 };
+
+type WorkerAgentCandidate = {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+};
+
+function normalizeAgentMatcherText(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function inferWorkerSpecialty(subtask: SwarmSubtask): "qa" | "engineer" | "research" | "general" {
+  const haystack = [subtask.kind, subtask.title, subtask.goal, subtask.taskKey ?? ""]
+    .map((value) => normalizeAgentMatcherText(value))
+    .join(" ");
+  if (
+    subtask.kind === "verification" ||
+    subtask.kind === "review" ||
+    /\b(qa|verify|verification|review|browser|e2e|test)\b/.test(haystack)
+  ) {
+    return "qa";
+  }
+  if (subtask.kind === "implementation" || /\b(engineer|implementation|code|patch|runtime|build|fix|dev)\b/.test(haystack)) {
+    return "engineer";
+  }
+  if (subtask.kind === "research" || /\b(research|investigate|analysis|analy[sz]e)\b/.test(haystack)) {
+    return "research";
+  }
+  return "general";
+}
+
+function scoreWorkerAgent(input: {
+  candidate: WorkerAgentCandidate;
+  plannerAgentId: string;
+  assignedCount: number;
+  specialty: "qa" | "engineer" | "research" | "general";
+}) {
+  const name = normalizeAgentMatcherText(input.candidate.name);
+  let score = 0;
+  if (input.candidate.id !== input.plannerAgentId) score += 1000;
+  if (input.candidate.role !== "ceo") score += 100;
+  if (input.candidate.status === "idle") score += 50;
+
+  if (input.specialty === "qa") {
+    if (/\b(qa|quality|review|test)\b/.test(name)) score += 500;
+  } else if (input.specialty === "engineer") {
+    if (/\b(engineer|developer|dev|builder)\b/.test(name)) score += 500;
+  } else if (input.specialty === "research") {
+    if (/\b(research|analyst)\b/.test(name)) score += 500;
+    if (/\b(engineer)\b/.test(name)) score += 100;
+  }
+
+  score -= input.assignedCount * 200;
+  return score;
+}
 
 function readIssueId(value: Record<string, unknown> | null | undefined) {
   const issueId = value?.issueId;
@@ -98,6 +154,48 @@ export function issueRunGraphService(db: Db) {
       .from(heartbeatRuns)
       .where(eq(heartbeatRuns.id, runId))
       .then((rows) => rows[0] ?? null);
+  }
+
+  async function getAssignableWorkerAgents(companyId: string) {
+    return db
+      .select({
+        id: agents.id,
+        name: agents.name,
+        role: agents.role,
+        status: agents.status,
+      })
+      .from(agents)
+      .where(eq(agents.companyId, companyId))
+      .then((rows) => rows.filter((row) => row.status !== "paused" && row.status !== "terminated" && row.status !== "pending_approval"));
+  }
+
+  function selectWorkerAgentId(input: {
+    plannerAgentId: string;
+    candidates: WorkerAgentCandidate[];
+    subtask: SwarmSubtask;
+    assignedCounts: Map<string, number>;
+  }) {
+    const specialty = inferWorkerSpecialty(input.subtask);
+    const ranked = [...input.candidates].sort((a, b) => {
+      const scoreA = scoreWorkerAgent({
+        candidate: a,
+        plannerAgentId: input.plannerAgentId,
+        assignedCount: input.assignedCounts.get(a.id) ?? 0,
+        specialty,
+      });
+      const scoreB = scoreWorkerAgent({
+        candidate: b,
+        plannerAgentId: input.plannerAgentId,
+        assignedCount: input.assignedCounts.get(b.id) ?? 0,
+        specialty,
+      });
+      if (scoreA !== scoreB) return scoreB - scoreA;
+      return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+    });
+    const selected = ranked[0] ?? null;
+    if (!selected) return input.plannerAgentId;
+    input.assignedCounts.set(selected.id, (input.assignedCounts.get(selected.id) ?? 0) + 1);
+    return selected.id;
   }
 
   async function findPlannerRoot(issueId: string, companyId: string) {
@@ -310,9 +408,18 @@ export function issueRunGraphService(db: Db) {
     });
     if (pendingSubtasks.length === 0) return [];
 
+    const workerCandidates = await getAssignableWorkerAgents(root.companyId);
+    const assignedCounts = new Map<string, number>();
+
     return spawnWorkers(
       root.id,
       pendingSubtasks.map((subtask) => ({
+        agentId: selectWorkerAgentId({
+          plannerAgentId: root.agentId,
+          candidates: workerCandidates,
+          subtask,
+          assignedCounts,
+        }),
         taskKey: subtask.taskKey,
         subtask,
         contextSnapshot: {
@@ -381,7 +488,10 @@ export function issueRunGraphService(db: Db) {
     return retryWorker;
   }
 
-  async function getIssueSummary(issueId: string): Promise<IssueOrchestrationSummary> {
+  async function getIssueSummary(
+    issueId: string,
+    sharedContextActor?: { type: "board" } | { type: "agent"; agentId?: string | null },
+  ): Promise<IssueOrchestrationSummary> {
     return db.transaction(async (tx) => {
       const scopedEvidence = issueRunEvidenceService(tx as unknown as Db);
       const scopedSharedContext = sharedContextService(tx as unknown as Db);
@@ -419,9 +529,15 @@ export function issueRunGraphService(db: Db) {
         .orderBy(asc(heartbeatRuns.graphDepth), asc(heartbeatRuns.createdAt));
 
       const evidenceBundle = await scopedEvidence.getIssueEvidenceBundle(issue.id);
-      const issueSharedContextPublications = await scopedSharedContext.list(issue.companyId, {
-        issueId: issue.id,
-      });
+      const issueSharedContextPublications = sharedContextActor
+        ? await scopedSharedContext.listAuthorized(
+            issue.companyId,
+            { issueId: issue.id },
+            sharedContextActor,
+          )
+        : await scopedSharedContext.list(issue.companyId, {
+            issueId: issue.id,
+          });
       const rootRunId =
         runs.find((run) => run.runType === "planner")?.id ??
         runs.find((run) => run.graphDepth === 0)?.id ??

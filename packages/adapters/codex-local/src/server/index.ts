@@ -1,6 +1,6 @@
 export { execute, ensureCodexSkillsInjected } from "./execute.js";
 export { testEnvironment } from "./test.js";
-export { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
+export { parseCodexJsonl, isCodexUnknownSessionError, isCodexTransientServerError } from "./parse.js";
 export {
   getQuotaWindows,
   readCodexAuthInfo,

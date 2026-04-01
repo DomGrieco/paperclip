@@ -61,13 +61,24 @@ export function parseCodexJsonl(stdout: string) {
   };
 }
 
-export function isCodexUnknownSessionError(stdout: string, stderr: string): boolean {
-  const haystack = `${stdout}\n${stderr}`
+function normalizeHaystack(stdout: string, stderr: string): string {
+  return `${stdout}\n${stderr}`
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
     .join("\n");
-  return /unknown (session|thread)|session .* not found|thread .* not found|conversation .* not found|missing rollout path for thread|state db missing rollout path/i.test(
+}
+
+export function isCodexUnknownSessionError(stdout: string, stderr: string): boolean {
+  const haystack = normalizeHaystack(stdout, stderr);
+  return /unknown (session|thread)|session .* not found|thread .* not found|conversation .* not found|missing rollout path for thread|state db missing rollout path|no rollout found for thread id/i.test(
+    haystack,
+  );
+}
+
+export function isCodexTransientServerError(stdout: string, stderr: string): boolean {
+  const haystack = normalizeHaystack(stdout, stderr);
+  return /failed to connect to websocket: HTTP error: 5\d\d\b|HTTP error: 5\d\d\b.*api\.openai\.com\/v1\/responses|responses_websocket/i.test(
     haystack,
   );
 }

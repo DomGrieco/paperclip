@@ -28,6 +28,8 @@ const SESSION_ID_REGEX = /^session_id:\s*(\S+)/m;
 const SESSION_ID_REGEX_LEGACY = /session[_ ](?:id|saved)[:\s]+([a-zA-Z0-9_-]+)/i;
 const COST_REGEX = /(?:cost|spent)[:\s]*\$?([\d.]+)/i;
 const TOKEN_USAGE_REGEX = /tokens?[^\d]*(\d+)[^\d]+(\d+)/i;
+const PAPERCLIP_RESULT_JSON_START = "PAPERCLIP_RESULT_JSON_START";
+const PAPERCLIP_RESULT_JSON_END = "PAPERCLIP_RESULT_JSON_END";
 
 const DEFAULT_PROMPT_TEMPLATE = `You are "{{agentName}}", an AI agent employee in a Paperclip-managed company.
 
@@ -98,6 +100,17 @@ function cfgRecord(v: unknown): Record<string, unknown> | undefined {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
 }
 
+export function resolveContainerHermesCommand(
+  ctx: Pick<AdapterExecutionContext, "context">,
+  config: Record<string, unknown>,
+): string {
+  const launchPlan = cfgRecord(ctx.context?.paperclipHermesContainerPlan);
+  const launchPlanCommand = Array.isArray(launchPlan?.command)
+    ? launchPlan.command.find((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : null;
+  return launchPlanCommand ?? cfgString(config.hermesCommand) ?? HERMES_CLI;
+}
+
 function getIssueDescriptionFromRuntimeMemory(runtimeBundle: Record<string, unknown> | undefined): string {
   const memory = cfgRecord(runtimeBundle?.memory);
   const snippets = Array.isArray(memory?.snippets) ? memory.snippets : [];
@@ -108,6 +121,65 @@ function getIssueDescriptionFromRuntimeMemory(runtimeBundle: Record<string, unkn
     }
   }
   return "";
+}
+
+function isPlannerRootRun(runtimeBundle: Record<string, unknown> | undefined): boolean {
+  const run = cfgRecord(runtimeBundle?.run);
+  const swarm = cfgRecord(runtimeBundle?.swarm);
+  const currentSubtask = cfgRecord(swarm?.currentSubtask);
+  return cfgString(run?.runType) === "planner" && !currentSubtask;
+}
+
+function appendPlannerResultContract(renderedPrompt: string, runtimeBundle: Record<string, unknown> | undefined): string {
+  if (!isPlannerRootRun(runtimeBundle)) return renderedPrompt;
+  return `${renderedPrompt}
+
+## Planner orchestration contract
+- This run is a planner root. Do not try to create worker or verification child runs through the Paperclip API.
+- Paperclip materializes child runs from structured planner output after this planner run succeeds.
+- If fan-out is warranted, emit exactly one final machine-readable block in your final response using this format:
+  ${PAPERCLIP_RESULT_JSON_START}
+  {"swarmPlan":{"version":"v1","rationale":"why fan-out is needed","subtasks":[{"id":"subtask-id","kind":"implementation","title":"short title","goal":"clear outcome","taskKey":"optional-stable-key","ownershipMode":"exclusive","allowedPaths":["path/you/own.ts"],"acceptanceChecks":["observable completion check"],"expectedArtifacts":[{"kind":"patch","required":true}],"recommendedModelTier":"balanced","budgetCents":25,"maxRuntimeSec":900}]}}
+  ${PAPERCLIP_RESULT_JSON_END}
+- Use valid JSON only inside that block. No markdown fences, comments, or trailing prose inside the block.
+- Allowed subtask kinds are exactly: \`research\`, \`implementation\`, \`verification\`, \`review\`. Use \`verification\` for QA/browser-visible validation work; do not invent kinds like \`validation\`.
+- Allowed artifact kinds are exactly: \`summary\`, \`patch\`, \`test_result\`, \`comment\`, \`document\`.
+- Allowed ownership modes are exactly: \`exclusive\`, \`advisory\`, \`read_only\`. If a subtask does not edit code (for example browser/QA validation), prefer \`read_only\` or \`advisory\` instead of \`exclusive\`.
+- Include each subtask's concrete goal, acceptance checks, expected artifacts, recommended model tier, and runtime budget. Use \`dependsOn\` when sequencing matters.
+- If you choose \`exclusive\`, include concrete \`allowedPaths\`. For browser-visible validation subtasks that should not edit files, omit \`allowedPaths\` and use \`read_only\`.
+- If the assigned issue can be completed directly without fan-out, omit the block and finish normally.
+- Never call speculative endpoints like \`POST /api/issues/{issueId}/runs\`; they are not the planner fan-out contract.`;
+}
+
+function appendWorkerResultContract(renderedPrompt: string, runtimeBundle: Record<string, unknown> | undefined): string {
+  const run = cfgRecord(runtimeBundle?.run);
+  const swarm = cfgRecord(runtimeBundle?.swarm);
+  const currentSubtask = cfgRecord(swarm?.currentSubtask);
+  if (cfgString(run?.runType) !== "worker" || !currentSubtask) return renderedPrompt;
+
+  const taskKey = cfgString(currentSubtask.taskKey) ?? cfgString(currentSubtask.id) ?? "worker-subtask";
+  const expectedArtifacts = Array.isArray(currentSubtask.expectedArtifacts)
+    ? JSON.stringify(currentSubtask.expectedArtifacts)
+    : "[]";
+  const acceptanceChecks = Array.isArray(currentSubtask.acceptanceChecks)
+    ? JSON.stringify(currentSubtask.acceptanceChecks)
+    : "[]";
+  return `${renderedPrompt}
+
+## Worker completion contract
+- This run is a swarm worker for subtask \`${taskKey}\`.
+- Required expected artifacts for this subtask: ${expectedArtifacts}
+- Acceptance checks for this subtask: ${acceptanceChecks}
+- Before finishing, emit exactly one final machine-readable block in your final response using this format:
+  ${PAPERCLIP_RESULT_JSON_START}
+  {"childOutput":{"summary":"concise evidence-backed summary of what was completed","status":"completed","notes":["optional concrete note"],"artifactClaims":[{"kind":"summary","label":"optional human-readable label","detail":"optional location or evidence detail"}]}}
+  ${PAPERCLIP_RESULT_JSON_END}
+- Use valid JSON only inside that block. No markdown fences, comments, or trailing prose inside the block.
+- Allowed child output status values are exactly \`completed\` or \`blocked\`.
+- The \`summary\` field is required and must be non-empty.
+- The \`artifactClaims\` list must name the concrete artifact kinds you actually produced for this subtask. Allowed artifact kinds are exactly: \`summary\`, \`patch\`, \`test_result\`, \`comment\`, \`document\`.
+- Match your artifact claims to the subtask's expected artifacts. If the task is validation-only, still emit a structured block describing the concrete evidence you produced.
+- Put any longer human-readable explanation outside the JSON block.`;
 }
 
 export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string, unknown>): string {
@@ -152,17 +224,19 @@ export function buildPrompt(ctx: AdapterExecutionContext, config: Record<string,
   let rendered = template;
   rendered = rendered.replace(/\{\{#taskId\}\}([\s\S]*?)\{\{\/taskId\}\}/g, taskId ? "$1" : "");
   rendered = rendered.replace(/\{\{#noTask\}\}([\s\S]*?)\{\{\/noTask\}\}/g, taskId ? "" : "$1");
-  const renderedPrompt = renderTemplate(rendered, vars);
+  const plannerPrompt = appendPlannerResultContract(renderTemplate(rendered, vars), runtimeBundle);
+  const renderedPrompt = appendWorkerResultContract(plannerPrompt, runtimeBundle);
   if (!apiPolicySummary) return renderedPrompt;
   return `${renderedPrompt}\n\n## Governed API contract\n${apiPolicySummary}\nAny helper call outside this contract will be rejected before it reaches the Paperclip API.`;
 }
 
-function parseHermesOutput(stdout: string, stderr: string): {
+export function parseHermesOutput(stdout: string, stderr: string): {
   response?: string;
   sessionId?: string;
   errorMessage?: string;
   usage?: UsageSummary;
   costUsd?: number;
+  resultJson?: Record<string, unknown>;
 } {
   const combined = `${stdout}\n${stderr}`;
   const result: {
@@ -171,6 +245,7 @@ function parseHermesOutput(stdout: string, stderr: string): {
     errorMessage?: string;
     usage?: UsageSummary;
     costUsd?: number;
+    resultJson?: Record<string, unknown>;
   } = {};
   const sessionMatch = stdout.match(SESSION_ID_REGEX);
   if (sessionMatch?.[1]) {
@@ -201,6 +276,27 @@ function parseHermesOutput(stdout: string, stderr: string): {
       .filter((line) => !/INFO|DEBUG|warn/i.test(line));
     if (errorLines.length > 0) {
       result.errorMessage = errorLines.slice(0, 5).join("\n");
+    }
+  }
+
+  const responseWithStructuredBlock = result.response ?? stdout.trim();
+  const structuredStart = responseWithStructuredBlock.lastIndexOf(PAPERCLIP_RESULT_JSON_START);
+  const structuredEnd = responseWithStructuredBlock.lastIndexOf(PAPERCLIP_RESULT_JSON_END);
+  if (structuredStart >= 0 && structuredEnd > structuredStart) {
+    const jsonText = responseWithStructuredBlock
+      .slice(structuredStart + PAPERCLIP_RESULT_JSON_START.length, structuredEnd)
+      .trim();
+    try {
+      const parsed = JSON.parse(jsonText) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        result.resultJson = parsed as Record<string, unknown>;
+        const before = responseWithStructuredBlock.slice(0, structuredStart).trim();
+        const after = responseWithStructuredBlock.slice(structuredEnd + PAPERCLIP_RESULT_JSON_END.length).trim();
+        const cleanSegments = [before, after].filter((segment) => segment.length > 0);
+        result.response = cleanSegments.length > 0 ? cleanSegments.join("\n\n") : undefined;
+      }
+    } catch {
+      // Keep the original response intact if the structured block is malformed.
     }
   }
   return result;
@@ -353,7 +449,7 @@ export async function executeHermesInContainer(ctx: AdapterExecutionContext): Pr
     throw new Error("Hermes container execution requested but no launched hermes_container runtime service was found in context.paperclipRuntimeServices");
   }
 
-  const hermesCmd = cfgString(config.hermesCommand) || HERMES_CLI;
+  const hermesCmd = resolveContainerHermesCommand(ctx, config);
   const model = cfgString(config.model) || DEFAULT_MODEL;
   const provider = cfgString(config.provider);
   const timeoutSec = cfgNumber(config.timeoutSec) || DEFAULT_TIMEOUT_SEC;
@@ -486,6 +582,7 @@ export async function executeHermesInContainer(ctx: AdapterExecutionContext): Pr
   if (parsed.errorMessage) executionResult.errorMessage = parsed.errorMessage;
   if (parsed.usage) executionResult.usage = parsed.usage;
   if (parsed.costUsd !== undefined) executionResult.costUsd = parsed.costUsd;
+  if (parsed.resultJson) executionResult.resultJson = parsed.resultJson;
   if (persistSession && parsed.sessionId) {
     executionResult.sessionParams = { sessionId: parsed.sessionId };
     executionResult.sessionDisplayId = parsed.sessionId.slice(0, 16);

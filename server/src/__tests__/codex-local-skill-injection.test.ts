@@ -93,4 +93,23 @@ describe("codex local adapter skill injection", () => {
       await fs.realpath(path.join(customRoot, "custom", "paperclip")),
     );
   });
+
+  it("injects Codex skills from a provided materialized skills directory", async () => {
+    const skillsDir = await makeTempDir("paperclip-codex-materialized-");
+    const skillsHome = await makeTempDir("paperclip-codex-home-");
+    cleanupDirs.add(skillsDir);
+    cleanupDirs.add(skillsHome);
+
+    await fs.mkdir(path.join(skillsDir, "managed-skill"), { recursive: true });
+    await fs.writeFile(path.join(skillsDir, "managed-skill", "SKILL.md"), "---\nname: managed-skill\n---\n", "utf8");
+
+    await ensureCodexSkillsInjected(async () => {}, {
+      skillsDir,
+      skillsHome,
+    });
+
+    expect(await fs.realpath(path.join(skillsHome, "managed-skill"))).toBe(
+      await fs.realpath(path.join(skillsDir, "managed-skill")),
+    );
+  });
 });

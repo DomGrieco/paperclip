@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isCodexUnknownSessionError, parseCodexJsonl } from "@paperclipai/adapter-codex-local/server";
+import { isCodexTransientServerError, isCodexUnknownSessionError, parseCodexJsonl } from "@paperclipai/adapter-codex-local/server";
 import { parseCodexStdoutLine } from "@paperclipai/adapter-codex-local/ui";
 import { printCodexStreamEvent } from "@paperclipai/adapter-codex-local/cli";
 
@@ -30,6 +30,22 @@ describe("codex_local stale session detection", () => {
       "2026-02-19T19:58:53.281939Z ERROR codex_core::rollout::list: state db missing rollout path for thread 019c775d-967c-7ef1-acc7-e396dc2c87cc";
 
     expect(isCodexUnknownSessionError("", stderr)).toBe(true);
+  });
+
+  it("treats thread/resume no-rollout errors as an unknown session error", () => {
+    const stderr =
+      "stderrError: thread/resume: thread/resume failed: no rollout found for thread id 019d0932-e047-7db1-a7fd-f885f9980bf8";
+
+    expect(isCodexUnknownSessionError("", stderr)).toBe(true);
+  });
+});
+
+describe("codex_local transient upstream detection", () => {
+  it("treats websocket 500 responses as transient server errors", () => {
+    const stderr =
+      "2026-04-01T03:32:01.115387Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 500 Internal Server Error, url: wss://api.openai.com/v1/responses";
+
+    expect(isCodexTransientServerError("", stderr)).toBe(true);
   });
 });
 

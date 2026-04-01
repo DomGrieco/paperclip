@@ -22,8 +22,8 @@ import {
   joinPromptSections,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
-import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
-import { pathExists, prepareWorktreeCodexHome, resolveCodexHomeDir } from "./codex-home.js";
+import { parseCodexJsonl, isCodexTransientServerError, isCodexUnknownSessionError } from "./parse.js";
+import { pathExists, prepareWorktreeCodexHome, resolveCodexHomeDir, syncSharedCodexHome } from "./codex-home.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
@@ -56,6 +56,19 @@ function firstNonEmptyLine(text: string): string {
 function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean {
   const raw = env[key];
   return typeof raw === "string" && raw.trim().length > 0;
+}
+
+function resolveContainerMountPath(planValue: unknown, kind: string, field: "hostPath" | "containerPath"): string | null {
+  const plan = parseObject(planValue);
+  const mounts = Array.isArray(plan.mounts)
+    ? plan.mounts.filter((value): value is Record<string, unknown> => typeof value === "object" && value !== null)
+    : [];
+  for (const mount of mounts) {
+    if (asString(mount.kind, "") !== kind) continue;
+    const resolved = asString(mount[field], "");
+    if (resolved) return field === "hostPath" ? path.resolve(resolved) : resolved;
+  }
+  return null;
 }
 
 function resolveCodexBillingType(env: Record<string, string>): "api" | "subscription" {
@@ -98,6 +111,7 @@ async function isLikelyPaperclipRuntimeSkillSource(candidate: string, skillName:
 }
 
 type EnsureCodexSkillsInjectedOptions = {
+  skillsDir?: string | null;
   skillsHome?: string;
   skillsEntries?: Awaited<ReturnType<typeof listPaperclipSkillEntries>>;
   linkSkill?: (source: string, target: string) => Promise<void>;
@@ -107,7 +121,12 @@ export async function ensureCodexSkillsInjected(
   onLog: AdapterExecutionContext["onLog"],
   options: EnsureCodexSkillsInjectedOptions = {},
 ) {
-  const skillsEntries = options.skillsEntries ?? await listPaperclipSkillEntries(__moduleDir);
+  const skillsEntries = options.skillsEntries
+    ?? (options.skillsDir
+      ? (await fs.readdir(options.skillsDir, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, source: path.join(options.skillsDir!, entry.name) }))
+      : await listPaperclipSkillEntries(__moduleDir));
   if (skillsEntries.length === 0) return;
 
   const skillsHome = options.skillsHome ?? path.join(resolveCodexHomeDir(process.env), "skills");
@@ -233,12 +252,34 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         : ".paperclip/runtime",
     runtimeBundle: context.paperclipRuntimeBundle,
   });
+  const containerAgentHomeHostPath = resolveContainerMountPath(context.paperclipAgentContainerPlan, "agent_home", "hostPath");
+  const containerSharedAuthPath = resolveContainerMountPath(context.paperclipAgentContainerPlan, "shared_auth", "containerPath");
   const preparedWorktreeCodexHome =
-    configuredCodexHome ? null : await prepareWorktreeCodexHome(process.env, onLog);
-  const effectiveCodexHome = configuredCodexHome ?? preparedWorktreeCodexHome;
+    configuredCodexHome || containerAgentHomeHostPath ? null : await prepareWorktreeCodexHome(process.env, onLog);
+  const effectiveCodexHome = configuredCodexHome ?? containerAgentHomeHostPath ?? preparedWorktreeCodexHome;
+  const sharedCodexHomeSource =
+    typeof envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE === "string" && envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim().length > 0
+      ? path.resolve(envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim())
+      : null;
+  if (effectiveCodexHome && sharedCodexHomeSource) {
+    await syncSharedCodexHome({
+      targetHome: effectiveCodexHome,
+      sourceHome: sharedCodexHomeSource,
+      symlinkSourceHome: containerSharedAuthPath || undefined,
+      onLog,
+    });
+  }
+  const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
   await ensureCodexSkillsInjected(
     onLog,
-    effectiveCodexHome ? { skillsHome: path.join(effectiveCodexHome, "skills") } : {},
+    effectiveCodexHome
+      ? {
+          skillsHome: path.join(effectiveCodexHome, "skills"),
+          skillsDir: materializedSkillsDir || undefined,
+        }
+      : materializedSkillsDir
+        ? { skillsDir: materializedSkillsDir }
+        : {},
   );
   const hasExplicitApiKey =
     typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
@@ -553,6 +594,25 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     };
   };
 
+  const maybeRetryTransientServerError = async (
+    attempt: Awaited<ReturnType<typeof runAttempt>>,
+    options: { clearSessionOnRetry: boolean },
+  ): Promise<AdapterExecutionResult> => {
+    if (
+      !attempt.proc.timedOut &&
+      (attempt.proc.exitCode ?? 0) !== 0 &&
+      isCodexTransientServerError(attempt.proc.stdout, attempt.rawStderr)
+    ) {
+      await onLog(
+        "stderr",
+        "[paperclip] Codex hit a transient upstream server error; retrying once with a fresh session.\n",
+      );
+      const retry = await runAttempt(null);
+      return toResult(retry, options.clearSessionOnRetry);
+    }
+    return toResult(attempt, options.clearSessionOnRetry);
+  };
+
   const initial = await runAttempt(sessionId);
   if (
     sessionId &&
@@ -565,8 +625,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       `[paperclip] Codex resume session "${sessionId}" is unavailable; retrying with a fresh session.\n`,
     );
     const retry = await runAttempt(null);
-    return toResult(retry, true);
+    return maybeRetryTransientServerError(retry, { clearSessionOnRetry: true });
   }
 
-  return toResult(initial);
+  return maybeRetryTransientServerError(initial, { clearSessionOnRetry: false });
 }

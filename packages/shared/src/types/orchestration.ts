@@ -156,6 +156,14 @@ export interface PaperclipSharedContextProvenance {
   sharedContextPath: string | null;
 }
 
+export interface PaperclipSharedContextManagedSkill {
+  name: string;
+  sourceType: "builtin" | "company" | "project" | "agent";
+  sourceLabel: string;
+  managedSkillId: string | null;
+  scopeId: string | null;
+}
+
 export interface PaperclipSharedContextPacket {
   version: "v1";
   scope: PaperclipSharedContextScope;
@@ -163,12 +171,16 @@ export interface PaperclipSharedContextPacket {
   runner: RuntimeBundleRunner;
   verification: RuntimeBundleVerification;
   memory: RuntimeBundleMemoryPacket;
+  managedSkills: {
+    skillsDir: string | null;
+    entries: PaperclipSharedContextManagedSkill[];
+  } | null;
   provenance: PaperclipSharedContextProvenance;
 }
 
 export interface RuntimeBundleRunner {
-  target: "local_host" | "adapter_managed" | "cloud_sandbox" | "hermes_container";
-  provider: "local_process" | "adapter_managed" | "cloud_sandbox" | "hermes_container";
+  target: "local_host" | "adapter_managed" | "cloud_sandbox" | "hermes_container" | "agent_container";
+  provider: "local_process" | "adapter_managed" | "cloud_sandbox" | "hermes_container" | "agent_container";
   workspaceStrategyType: string | null;
   executionMode: string | null;
   browserCapable: boolean;
@@ -194,7 +206,7 @@ export interface HermesBootstrapImportSummary {
   secretEnvKeys: string[];
 }
 
-export interface HermesContainerMountPlan {
+export interface AgentContainerMountPlan {
   kind: "workspace" | "agent_home" | "runtime_bundle" | "shared_auth" | "managed_runtime";
   hostPath: string;
   containerPath: string;
@@ -202,7 +214,7 @@ export interface HermesContainerMountPlan {
   purpose: string;
 }
 
-export interface HermesContainerEnvPlan {
+export interface AgentContainerEnvPlan {
   name: string;
   value: string;
   secret: boolean;
@@ -215,29 +227,36 @@ export interface HermesContainerEnvPlan {
     | "worker_home";
 }
 
-export interface HermesContainerLaunchPlan {
+export interface AgentContainerLaunchPlan {
   version: "v1";
+  adapterType: string;
   runner: RuntimeBundleRunner;
   image: string;
   command: string[];
   workingDir: string;
   workspacePath: string;
+  nativeHomePath: string;
+  nativeSkillsPath: string | null;
   agentHomePath: string;
   sharedAuthSourcePath: string | null;
   runtimeBundleRoot: string | null;
   sharedContextPath: string | null;
   provider: string | null;
   model: string | null;
-  mounts: HermesContainerMountPlan[];
-  env: HermesContainerEnvPlan[];
+  mounts: AgentContainerMountPlan[];
+  env: AgentContainerEnvPlan[];
   runtimeService: {
     serviceName: string;
-    provider: "hermes_container";
+    provider: "hermes_container" | "agent_container";
     scopeType: "run";
     scopeId: string;
     ownerAgentId: string;
   };
 }
+
+export type HermesContainerMountPlan = AgentContainerMountPlan;
+export type HermesContainerEnvPlan = AgentContainerEnvPlan;
+export type HermesContainerLaunchPlan = AgentContainerLaunchPlan;
 
 export interface RuntimeBundleProjection {
   runtime: RuntimeBundleTarget;
