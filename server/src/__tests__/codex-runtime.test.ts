@@ -107,6 +107,7 @@ describe("injectCodexContainerExecConfig", () => {
     });
 
     expect(String(nextConfig.command)).toContain("server/scripts/agent-container-exec.js");
+    expect(String(nextConfig.command)).not.toContain("server/server/scripts/agent-container-exec.js");
     expect(nextConfig.env).toMatchObject({
       CODEX_HOME: "/tmp/paperclip/workspaces/run-1/.paperclip/codex-home",
       PAPERCLIP_AGENT_CONTAINER_ID: "container-123",

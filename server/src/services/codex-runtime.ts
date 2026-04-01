@@ -1,8 +1,10 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentContainerLaunchPlan } from "@paperclipai/shared";
 import { ensureManagedCodexRuntime, type CodexManagedRuntimeResolution } from "./codex-managed-runtime.js";
 
-const containerExecScriptPath = path.resolve(process.cwd(), "server", "scripts", "agent-container-exec.js");
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const containerExecScriptPath = path.resolve(moduleDir, "..", "..", "scripts", "agent-container-exec.js");
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;

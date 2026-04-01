@@ -122,6 +122,7 @@ describe("injectCursorContainerExecConfig", () => {
     });
 
     expect(String(nextConfig.command)).toContain("server/scripts/agent-container-exec.js");
+    expect(String(nextConfig.command)).not.toContain("server/server/scripts/agent-container-exec.js");
     expect(nextConfig.env).toMatchObject({
       HOME: "/tmp/paperclip/workspaces/run-1/.paperclip/cursor-home",
       PAPERCLIP_AGENT_CONTAINER_ID: "container-cursor-123",
