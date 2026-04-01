@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import http from "node:http";
+import net from "node:net";
 
 const DOCKER_SOCKET_PATH = process.env.PAPERCLIP_DOCKER_SOCKET_PATH?.trim() || "/var/run/docker.sock";
 
@@ -84,44 +85,95 @@ async function createDockerExec({ containerId, cmd, env, workdir }) {
 function startDockerExec({ execId, stdin }) {
   const payload = JSON.stringify({ Detach: false, Tty: false });
   return new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        socketPath: DOCKER_SOCKET_PATH,
-        path: `/v1.41/exec/${encodeURIComponent(execId)}/start`,
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload) + stdin.length,
-        },
-      },
-      (res) => {
-        if ((res.statusCode ?? 500) < 200 || (res.statusCode ?? 500) >= 300) {
-          const chunks = [];
-          res.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-          res.on("end", () => reject(new Error(`docker exec start failed (${res.statusCode}): ${Buffer.concat(chunks).toString("utf8")}`)));
+    const socket = net.createConnection(DOCKER_SOCKET_PATH);
+    let headerBuffer = Buffer.alloc(0);
+    let streamBuffer = Buffer.alloc(0);
+    let headersParsed = false;
+    let rawStreamMode = false;
+    let sentStdin = false;
+    let statusCode = 0;
+    let errorBody = Buffer.alloc(0);
+
+    const flushFrames = () => {
+      while (streamBuffer.length >= 8) {
+        const frameSize = streamBuffer.readUInt32BE(4);
+        if (streamBuffer.length < 8 + frameSize) return;
+        const frameType = streamBuffer[0] === 2 ? "stderr" : "stdout";
+        const framePayload = streamBuffer.subarray(8, 8 + frameSize);
+        streamBuffer = streamBuffer.subarray(8 + frameSize);
+        if (frameType === "stderr") process.stderr.write(framePayload);
+        else process.stdout.write(framePayload);
+      }
+    };
+
+    const maybeSendStdin = () => {
+      if (sentStdin) return;
+      sentStdin = true;
+      if (stdin.length > 0) socket.write(stdin);
+      socket.end();
+    };
+
+    socket.on("connect", () => {
+      const request = [
+        `POST /v1.41/exec/${encodeURIComponent(execId)}/start HTTP/1.1`,
+        "Host: docker",
+        "Connection: Upgrade",
+        "Upgrade: tcp",
+        "Content-Type: application/json",
+        `Content-Length: ${Buffer.byteLength(payload)}`,
+        "",
+        payload,
+      ].join("\r\n");
+      socket.write(request);
+    });
+
+    socket.on("data", (chunk) => {
+      const bufferChunk = Buffer.from(chunk);
+      if (!headersParsed) {
+        headerBuffer = Buffer.concat([headerBuffer, bufferChunk]);
+        const headerEnd = headerBuffer.indexOf("\r\n\r\n");
+        if (headerEnd === -1) return;
+        const rawHeaders = headerBuffer.subarray(0, headerEnd).toString("utf8");
+        const remainder = headerBuffer.subarray(headerEnd + 4);
+        headersParsed = true;
+        const [statusLine] = rawHeaders.split("\r\n", 1);
+        const match = /^HTTP\/1\.1\s+(\d{3})\b/.exec(statusLine ?? "");
+        statusCode = match ? Number.parseInt(match[1], 10) : 0;
+        if ((statusCode >= 200 && statusCode < 300) || statusCode === 101) {
+          rawStreamMode = true;
+          if (remainder.length > 0) {
+            streamBuffer = Buffer.concat([streamBuffer, remainder]);
+            flushFrames();
+          }
+          maybeSendStdin();
           return;
         }
+        errorBody = remainder;
+        return;
+      }
 
-        let buffer = Buffer.alloc(0);
-        res.on("data", (chunk) => {
-          buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
-          while (buffer.length >= 8) {
-            const frameSize = buffer.readUInt32BE(4);
-            if (buffer.length < 8 + frameSize) return;
-            const frameType = buffer[0] === 2 ? "stderr" : "stdout";
-            const payload = buffer.subarray(8, 8 + frameSize);
-            buffer = buffer.subarray(8 + frameSize);
-            if (frameType === "stderr") process.stderr.write(payload);
-            else process.stdout.write(payload);
-          }
-        });
-        res.on("end", resolve);
-      },
-    );
-    req.on("error", reject);
-    req.write(payload);
-    if (stdin.length > 0) req.write(stdin);
-    req.end();
+      if (rawStreamMode) {
+        streamBuffer = Buffer.concat([streamBuffer, bufferChunk]);
+        flushFrames();
+        return;
+      }
+
+      errorBody = Buffer.concat([errorBody, bufferChunk]);
+    });
+
+    socket.on("end", () => {
+      if (!headersParsed) {
+        reject(new Error("docker exec start failed: connection ended before response headers"));
+        return;
+      }
+      if (!rawStreamMode) {
+        reject(new Error(`docker exec start failed (${statusCode || 500}): ${errorBody.toString("utf8")}`));
+        return;
+      }
+      resolve();
+    });
+
+    socket.on("error", reject);
   });
 }
 

@@ -1,4 +1,4 @@
-import http from "node:http";
+import net from "node:net";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -6,10 +6,11 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 
-type CapturedRequest = {
+type RequestRecord = {
   method: string;
-  url: string;
+  path: string;
   body: Buffer;
+  hijackedStdin?: Buffer;
 };
 
 const tempPaths: string[] = [];
@@ -30,46 +31,120 @@ function dockerFrame(stream: "stdout" | "stderr", text: string): Buffer {
   return Buffer.concat([header, payload]);
 }
 
+function tryConsumeHttpRequest(buffer: Buffer):
+  | { request: RequestRecord; remainder: Buffer }
+  | null {
+  const headerEnd = buffer.indexOf("\r\n\r\n");
+  if (headerEnd === -1) return null;
+  const rawHeaders = buffer.subarray(0, headerEnd).toString("utf8");
+  const lines = rawHeaders.split("\r\n");
+  const [requestLine, ...headerLines] = lines;
+  const requestMatch = /^(\S+)\s+(\S+)\s+HTTP\/1\.1$/.exec(requestLine ?? "");
+  if (!requestMatch) throw new Error(`Malformed request line: ${requestLine ?? "<empty>"}`);
+  const headers = new Map<string, string>();
+  for (const line of headerLines) {
+    const colon = line.indexOf(":");
+    if (colon === -1) continue;
+    headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+  }
+  const contentLength = Number.parseInt(headers.get("content-length") ?? "0", 10) || 0;
+  const bodyStart = headerEnd + 4;
+  const bodyEnd = bodyStart + contentLength;
+  if (buffer.length < bodyEnd) return null;
+  return {
+    request: {
+      method: requestMatch[1],
+      path: requestMatch[2],
+      body: buffer.subarray(bodyStart, bodyEnd),
+    },
+    remainder: buffer.subarray(bodyEnd),
+  };
+}
+
 describe("agent-container-exec wrapper", () => {
-  it("closes docker exec stdin after forwarding the prompt payload", async () => {
+  it("sends only JSON in exec start body and forwards prompt over the hijacked stream", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-agent-container-exec-"));
     tempPaths.push(root);
     const socketPath = path.join(root, "docker.sock");
     const scriptPath = path.resolve("/Users/eru/Documents/GitHub/paperclip/server/scripts/agent-container-exec.js");
     const prompt = "Investigate the websocket failure.\n";
-    const requests: CapturedRequest[] = [];
+    const requests: RequestRecord[] = [];
 
-    const server = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-      req.on("end", () => {
-        const body = Buffer.concat(chunks);
-        requests.push({
-          method: req.method ?? "GET",
-          url: req.url ?? "/",
-          body,
-        });
+    const server = net.createServer((socket) => {
+      let buffer = Buffer.alloc(0);
+      let hijackRequest: RequestRecord | null = null;
 
-        if (req.url === "/v1.41/containers/container-123/exec") {
-          res.writeHead(201, { "content-type": "application/json" });
-          res.end(JSON.stringify({ Id: "exec-123" }));
+      socket.on("data", (chunk) => {
+        buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
+
+        if (hijackRequest) {
+          hijackRequest.hijackedStdin = Buffer.concat([
+            hijackRequest.hijackedStdin ?? Buffer.alloc(0),
+            buffer,
+          ]);
+          buffer = Buffer.alloc(0);
           return;
         }
 
-        if (req.url === "/v1.41/exec/exec-123/start") {
-          res.writeHead(200, { "content-type": "application/vnd.docker.raw-stream" });
-          res.end(dockerFrame("stdout", "container command finished\n"));
+        while (true) {
+          const parsed = tryConsumeHttpRequest(buffer);
+          if (!parsed) return;
+          buffer = parsed.remainder;
+          requests.push(parsed.request);
+
+          if (parsed.request.path === "/v1.41/containers/container-123/exec") {
+            socket.write(
+              [
+                "HTTP/1.1 201 Created",
+                "Content-Type: application/json",
+                `Content-Length: ${Buffer.byteLength('{"Id":"exec-123"}')}`,
+                "",
+                '{"Id":"exec-123"}',
+              ].join("\r\n"),
+            );
+            continue;
+          }
+
+          if (parsed.request.path === "/v1.41/exec/exec-123/start") {
+            hijackRequest = parsed.request;
+            socket.write(
+              [
+                "HTTP/1.1 101 UPGRADED",
+                "Connection: Upgrade",
+                "Upgrade: tcp",
+                "Content-Type: application/vnd.docker.raw-stream",
+                "",
+                "",
+              ].join("\r\n"),
+            );
+            socket.write(dockerFrame("stdout", "container command finished\n"));
+            return;
+          }
+
+          if (parsed.request.path === "/v1.41/exec/exec-123/json") {
+            socket.write(
+              [
+                "HTTP/1.1 200 OK",
+                "Content-Type: application/json",
+                `Content-Length: ${Buffer.byteLength('{"ExitCode":0}')}`,
+                "",
+                '{"ExitCode":0}',
+              ].join("\r\n"),
+            );
+            continue;
+          }
+
+          socket.write(
+            [
+              "HTTP/1.1 404 Not Found",
+              "Content-Type: application/json",
+              `Content-Length: ${Buffer.byteLength('{"error":"not found"}')}`,
+              "",
+              '{"error":"not found"}',
+            ].join("\r\n"),
+          );
           return;
         }
-
-        if (req.url === "/v1.41/exec/exec-123/json") {
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ExitCode: 0 }));
-          return;
-        }
-
-        res.writeHead(404, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: "not found" }));
       });
     });
 
@@ -104,11 +179,9 @@ describe("agent-container-exec wrapper", () => {
     expect(Buffer.concat(stderrChunks).toString("utf8")).toBe("");
     expect(Buffer.concat(stdoutChunks).toString("utf8")).toContain("container command finished");
 
-    const startRequest = requests.find((request) => request.url === "/v1.41/exec/exec-123/start");
+    const startRequest = requests.find((request) => request.path === "/v1.41/exec/exec-123/start");
     expect(startRequest).toBeDefined();
-    const startBody = startRequest?.body ?? Buffer.alloc(0);
-    const payloadPrefix = Buffer.from('{"Detach":false,"Tty":false}', "utf8");
-    expect(startBody.subarray(0, payloadPrefix.length).toString("utf8")).toBe(payloadPrefix.toString("utf8"));
-    expect(startBody.subarray(payloadPrefix.length).toString("utf8")).toBe(prompt);
+    expect(startRequest?.body.toString("utf8")).toBe('{"Detach":false,"Tty":false}');
+    expect(startRequest?.hijackedStdin?.toString("utf8")).toBe(prompt);
   });
 });
