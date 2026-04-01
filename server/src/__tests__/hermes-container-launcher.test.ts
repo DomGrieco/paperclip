@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildContainerName,
   buildDockerBindsFromPlan,
   buildHermesContainerDockerArgs,
   injectHermesContainerLauncherService,
@@ -105,6 +106,15 @@ describe("hermes-container-launcher", () => {
     expect(args).toContain("/tmp/workspace:/workspace");
     expect(args).toContain("-e");
     expect(args).toContain("HERMES_HOME=/home/hermes/.hermes");
+  });
+
+  it("uses distinct container name prefixes for Hermes and generic agent containers", () => {
+    expect(buildContainerName({ runId: "run-1", serviceId: "service-1", provider: "hermes_container" })).toContain(
+      "paperclip-hermes-",
+    );
+    expect(buildContainerName({ runId: "run-1", serviceId: "service-1", provider: "agent_container" })).toContain(
+      "paperclip-agent-",
+    );
   });
 
   it("resolves a bind-mount source from a source container mount table", () => {

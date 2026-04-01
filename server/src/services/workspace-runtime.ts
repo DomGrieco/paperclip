@@ -1294,7 +1294,14 @@ async function stopRuntimeService(serviceId: string) {
   record.lastUsedAt = new Date().toISOString();
   record.stoppedAt = new Date().toISOString();
   if ((record.provider === "hermes_container" || record.provider === "agent_container") && record.providerRef) {
-    await removeAgentContainer(record.providerRef);
+    try {
+      await removeAgentContainer(record.providerRef);
+    } catch (err) {
+      record.healthStatus = "unhealthy";
+      console.warn(
+        `[workspace-runtime] failed to remove ${record.provider} container ${record.providerRef} for service ${record.id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   } else if (record.child && record.child.pid) {
     terminateChildProcess(record.child);
   }
@@ -1522,11 +1529,15 @@ export async function listWorkspaceRuntimeServicesForProjectWorkspaces(
   return grouped;
 }
 
-export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
+export async function reconcilePersistedRuntimeServicesOnStartup(
+  db: Db,
+  options?: { removeContainer?: (containerId: string) => Promise<void> },
+) {
   const restartScopedProviders: Array<string> = ["local_process", "hermes_container", "agent_container"];
+  const containerScopedProviders: Array<string> = ["hermes_container", "agent_container"];
   const activeStatuses: Array<string> = ["starting", "running"];
   const staleRows = await db
-    .select({ id: workspaceRuntimeServices.id })
+    .select({ id: workspaceRuntimeServices.id, provider: workspaceRuntimeServices.provider, providerRef: workspaceRuntimeServices.providerRef })
     .from(workspaceRuntimeServices)
     .where(
       and(
@@ -1536,6 +1547,28 @@ export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
     );
 
   if (staleRows.length === 0) return { reconciled: 0 };
+
+  const removableContainerRefs = await db
+    .select({ id: workspaceRuntimeServices.id, providerRef: workspaceRuntimeServices.providerRef })
+    .from(workspaceRuntimeServices)
+    .where(inArray(workspaceRuntimeServices.provider, containerScopedProviders));
+
+  const removeContainer = options?.removeContainer ?? removeAgentContainer;
+  const failedContainerCleanupRowIds = new Set<string>();
+  const seenContainerRefs = new Set<string>();
+  for (const row of removableContainerRefs) {
+    const containerId = typeof row.providerRef === "string" ? row.providerRef.trim() : "";
+    if (!containerId || seenContainerRefs.has(containerId)) continue;
+    seenContainerRefs.add(containerId);
+    try {
+      await removeContainer(containerId);
+    } catch (err) {
+      failedContainerCleanupRowIds.add(row.id);
+      console.warn(
+        `[workspace-runtime] failed to reap persisted container ${containerId} during startup reconciliation: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   const now = new Date();
   await db
@@ -1553,6 +1586,16 @@ export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
         inArray(workspaceRuntimeServices.status, activeStatuses),
       ),
     );
+
+  if (failedContainerCleanupRowIds.size > 0) {
+    await db
+      .update(workspaceRuntimeServices)
+      .set({
+        healthStatus: "unhealthy",
+        updatedAt: now,
+      })
+      .where(inArray(workspaceRuntimeServices.id, Array.from(failedContainerCleanupRowIds)));
+  }
 
   return { reconciled: staleRows.length };
 }

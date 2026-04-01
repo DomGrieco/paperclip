@@ -169,8 +169,14 @@ describe("reconcilePersistedRuntimeServicesOnStartup", () => {
       },
     ]);
 
-    const result = await reconcilePersistedRuntimeServicesOnStartup(db);
+    const removedContainerIds: string[] = [];
+    const result = await reconcilePersistedRuntimeServicesOnStartup(db, {
+      removeContainer: async (containerId) => {
+        removedContainerIds.push(containerId);
+      },
+    });
     expect(result).toEqual({ reconciled: 3 });
+    expect(removedContainerIds).toEqual(["container-hermes", "container-codex"]);
 
     const local = await db.query.workspaceRuntimeServices.findFirst({
       where: eq(workspaceRuntimeServices.id, "00000000-0000-4000-8000-000000000101"),
@@ -194,5 +200,49 @@ describe("reconcilePersistedRuntimeServicesOnStartup", () => {
     expect(adapterManaged?.status).toBe("running");
     expect(adapterManaged?.healthStatus).toBe("healthy");
     expect(adapterManaged?.stoppedAt).toBeNull();
+  });
+
+  it("marks stale container-backed runtime services unhealthy when startup cleanup fails", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({
+      id: "00000000-0000-4000-8000-000000000011",
+      name: "Paperclip",
+      issuePrefix: "PAP",
+    }).returning();
+
+    const now = new Date("2026-04-01T00:00:00.000Z");
+    await db.insert(workspaceRuntimeServices).values({
+      id: "00000000-0000-4000-8000-000000000203",
+      companyId: company.id,
+      scopeType: "run",
+      scopeId: "run-agent",
+      serviceName: "codex-worker",
+      status: "running",
+      lifecycle: "ephemeral",
+      provider: "agent_container",
+      providerRef: "container-codex",
+      healthStatus: "healthy",
+      lastUsedAt: now,
+      startedAt: now,
+      updatedAt: now,
+    });
+
+    const result = await reconcilePersistedRuntimeServicesOnStartup(db, {
+      removeContainer: async () => {
+        throw new Error("docker remove failed");
+      },
+    });
+    expect(result).toEqual({ reconciled: 1 });
+
+    const agent = await db.query.workspaceRuntimeServices.findFirst({
+      where: eq(workspaceRuntimeServices.id, "00000000-0000-4000-8000-000000000203"),
+    });
+
+    expect(agent?.status).toBe("stopped");
+    expect(agent?.healthStatus).toBe("unhealthy");
+    expect(agent?.stoppedAt).not.toBeNull();
   });
 });

@@ -106,7 +106,11 @@ export function buildHermesContainerDockerArgs(input: {
   image: string;
   plan: HermesContainerLaunchPlan;
 }): string[] {
-  const containerName = `paperclip-hermes-${slugify(input.runId).slice(0, 18)}-${slugify(input.serviceId).slice(0, 12)}`;
+  const containerName = buildContainerName({
+    runId: input.runId,
+    serviceId: input.serviceId,
+    provider: "hermes_container",
+  });
   const args: string[] = [
     "run",
     "-d",
@@ -140,8 +144,13 @@ export function buildHermesContainerDockerArgs(input: {
   return args;
 }
 
-function buildContainerName(input: { runId: string; serviceId: string }): string {
-  return `paperclip-hermes-${slugify(input.runId).slice(0, 18)}-${slugify(input.serviceId).slice(0, 12)}`;
+export function buildContainerName(input: {
+  runId: string;
+  serviceId: string;
+  provider: "hermes_container" | "agent_container";
+}): string {
+  const prefix = input.provider === "hermes_container" ? "paperclip-hermes" : "paperclip-agent";
+  return `${prefix}-${slugify(input.runId).slice(0, 18)}-${slugify(input.serviceId).slice(0, 12)}`;
 }
 
 async function dockerApiRequest(input: {
@@ -348,7 +357,11 @@ export async function createAndStartAgentContainer(input: {
   plan: AgentContainerLaunchPlan;
   workspaceCwd: string;
 }): Promise<string> {
-  const containerName = buildContainerName({ runId: input.runId, serviceId: input.serviceId });
+  const containerName = buildContainerName({
+    runId: input.runId,
+    serviceId: input.serviceId,
+    provider: input.plan.runtimeService.provider,
+  });
   const sourceContainer = await resolveHermesContainerSourceContainerName();
   const sourceContainerDetails = await inspectContainerDetails(sourceContainer);
   const binds = buildDockerBindsFromPlan({
