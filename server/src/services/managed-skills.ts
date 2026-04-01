@@ -124,6 +124,10 @@ function mapManagedSkill(row: typeof managedSkills.$inferSelect): ManagedSkill {
     description: row.description,
     bodyMarkdown: row.bodyMarkdown,
     status: row.status as ManagedSkillStatus,
+    importedFromAgentId: row.importedFromAgentId,
+    importedFromRunId: row.importedFromRunId,
+    importedSourcePath: row.importedSourcePath,
+    importedAt: row.importedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

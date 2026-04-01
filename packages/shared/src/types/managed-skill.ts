@@ -1,4 +1,4 @@
-export type ManagedSkillStatus = "active" | "archived";
+export type ManagedSkillStatus = "active" | "pending_review" | "archived";
 export type ManagedSkillScopeType = "company" | "project" | "agent";
 export type ManagedSkillEffectiveSourceType = "builtin" | ManagedSkillScopeType;
 
@@ -10,6 +10,10 @@ export interface ManagedSkill {
   description: string | null;
   bodyMarkdown: string;
   status: ManagedSkillStatus;
+  importedFromAgentId: string | null;
+  importedFromRunId: string | null;
+  importedSourcePath: string | null;
+  importedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

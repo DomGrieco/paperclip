@@ -56,6 +56,7 @@ import { buildAgentContainerLaunchPlan } from "./agent-container-plan.js";
 import { injectAgentContainerLauncherService } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
+import { importNativeSkillsFromCompletedRun } from "./agent-native-skill-imports.js";
 import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import { logActivity } from "./activity-log.js";
 import {
@@ -2642,6 +2643,44 @@ export function heartbeatService(db: Db) {
         });
       }
 
+      const importedNativeSkills = outcome === "succeeded"
+        ? await importNativeSkillsFromCompletedRun(db, {
+            companyId: agent.companyId,
+            agentId: agent.id,
+            runId: run.id,
+            adapterType: agent.adapterType,
+            executionWorkspaceCwd: executionWorkspace.cwd,
+            executionConfig,
+          }).catch((error) => {
+            logger.warn(
+              {
+                err: error,
+                runId: run.id,
+                agentId: agent.id,
+              },
+              "failed to auto-import native skills after completed run",
+            );
+            return [];
+          })
+        : [];
+      for (const importedSkill of importedNativeSkills) {
+        await logActivity(db, {
+          companyId: agent.companyId,
+          actorType: "agent",
+          actorId: agent.id,
+          agentId: agent.id,
+          runId: run.id,
+          action: "managed_skill.imported_native",
+          entityType: "managed_skill",
+          entityId: importedSkill.id,
+          details: {
+            slug: importedSkill.slug,
+            importedAt: importedSkill.importedAt.toISOString(),
+            sourcePath: importedSkill.sourcePath,
+          },
+        });
+      }
+
       const finalizedRun = await getRun(run.id);
       if (finalizedRun) {
         if (finalizedRun.runType === "planner" && outcome === "succeeded") {
@@ -2670,6 +2709,19 @@ export function heartbeatService(db: Db) {
           await issueRunEvidence.synthesizePlannerReview(finalizedRun.rootRunId);
         }
         const runForEvent = await getRun(finalizedRun.id) ?? finalizedRun;
+        if (importedNativeSkills.length > 0) {
+          await appendRunEvent(runForEvent, seq++, {
+            eventType: "artifact",
+            stream: "system",
+            level: "info",
+            message: `imported ${importedNativeSkills.length} native skill${importedNativeSkills.length === 1 ? "" : "s"} for review`,
+            payload: {
+              importedManagedSkillIds: importedNativeSkills.map((skill) => skill.id),
+              importedManagedSkillSlugs: importedNativeSkills.map((skill) => skill.slug),
+              importedCount: importedNativeSkills.length,
+            },
+          });
+        }
         await appendRunEvent(runForEvent, seq++, {
           eventType: "lifecycle",
           stream: "system",

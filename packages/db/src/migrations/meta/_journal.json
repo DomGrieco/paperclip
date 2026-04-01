@@ -295,6 +295,13 @@
       "when": 1774901988695,
       "tag": "0041_gigantic_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1774911000000,
+      "tag": "0042_native_skill_imports",
+      "breakpoints": true
     }
   ]
 }

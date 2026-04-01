@@ -12,7 +12,7 @@ const mockState = vi.hoisted(() => ({
     slug: string;
     description: string | null;
     bodyMarkdown: string;
-    status: "active" | "archived";
+    status: "active" | "pending_review" | "archived";
     createdAt: string;
     updatedAt: string;
   }>,
@@ -102,6 +102,17 @@ describe("ManagedSkills page", () => {
       {
         id: "skill-2",
         companyId: "company-1",
+        name: "Native Research",
+        slug: "native-research",
+        description: "Imported for review",
+        bodyMarkdown: "# Native Research",
+        status: "pending_review",
+        createdAt: "2026-03-31T00:00:00.000Z",
+        updatedAt: "2026-03-31T00:05:00.000Z",
+      },
+      {
+        id: "skill-3",
+        companyId: "company-1",
         name: "Archived Research UI",
         slug: "archived-research-ui",
         description: "Archived variant",
@@ -117,6 +128,7 @@ describe("ManagedSkills page", () => {
     expect(html).toContain("Research UI");
     expect(html).toContain("research-ui");
     expect(html).toContain("Improve UI research prompts");
+    expect(html).toContain("pending_review");
     expect(html).toContain("Scopes");
     expect(html).toContain("Edit");
     expect(html).toContain("Archive");

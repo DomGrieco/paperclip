@@ -23,7 +23,7 @@ type ManagedSkillFormState = {
   slug: string;
   description: string;
   bodyMarkdown: string;
-  status: "active" | "archived";
+  status: "active" | "pending_review" | "archived";
 };
 
 type ScopeDraftState = {
@@ -444,12 +444,13 @@ export function ManagedSkills() {
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={formState.status} onValueChange={(value) => updateField("status", value as "active" | "archived")}>
+                <Select value={formState.status} onValueChange={(value) => updateField("status", value as "active" | "pending_review" | "archived")}>
                   <SelectTrigger>
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="pending_review">Pending review</SelectItem>
                     <SelectItem value="archived">Archived</SelectItem>
                   </SelectContent>
                 </Select>

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const MANAGED_SKILL_STATUSES = ["active", "archived"] as const;
+export const MANAGED_SKILL_STATUSES = ["active", "pending_review", "archived"] as const;
 export const MANAGED_SKILL_SCOPE_TYPES = ["company", "project", "agent"] as const;
 
 export const managedSkillStatusSchema = z.enum(MANAGED_SKILL_STATUSES);
