@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { agents } from "@paperclipai/db";
 import { resolveDefaultAgentWorkspaceDir } from "../home-paths.js";
 import {
@@ -7,6 +10,7 @@ import {
   formatRuntimeWorkspaceWarningLog,
   prioritizeProjectWorkspaceCandidatesForRun,
   parseSessionCompactionPolicy,
+  resetFallbackWorkspaceForFreshRun,
   resolveRuntimeBundleTargetForAgent,
   resolveRuntimeSessionParamsForWorkspace,
   shouldResetTaskSessionForWake,
@@ -192,6 +196,23 @@ describe("formatRuntimeWorkspaceWarningLog", () => {
       stream: "stdout",
       chunk: "[paperclip] Using fallback workspace\n",
     });
+  });
+});
+
+describe("resetFallbackWorkspaceForFreshRun", () => {
+  it("removes prior scratch files before a fresh fallback run", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-fallback-reset-"));
+    const workspace = path.join(root, "workspace");
+    await fs.mkdir(path.join(workspace, "node_modules", "typescript"), { recursive: true });
+    await fs.writeFile(path.join(workspace, "package.json"), "{}", "utf8");
+    await fs.writeFile(path.join(workspace, "node_modules", "typescript", "package.json"), "{}", "utf8");
+    await fs.mkdir(path.join(workspace, ".paperclip", "runtime"), { recursive: true });
+    await fs.writeFile(path.join(workspace, ".paperclip", "runtime", "bundle.json"), "{}", "utf8");
+
+    await resetFallbackWorkspaceForFreshRun(workspace);
+
+    expect(await fs.readdir(workspace)).toEqual([]);
+    await fs.rm(root, { recursive: true, force: true });
   });
 });
 

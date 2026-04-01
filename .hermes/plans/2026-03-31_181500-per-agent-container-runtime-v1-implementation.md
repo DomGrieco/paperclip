@@ -182,6 +182,56 @@ Validation:
 
 ---
 
+## Immediate follow-up slice: fallback workspace hygiene and Cursor runtime note clarity
+
+Objective: keep containerized heartbeat runs autonomous without letting fallback workspaces become persistent garbage magnets or misleading the agent about what environment/workspace it is operating in.
+
+Why this comes before Slice 2:
+- live Cursor validation showed the agent was running in a fallback non-project workspace and treated it like a real repo, creating `package.json`, `package-lock.json`, `tsconfig.json`, and `node_modules`
+- those edits persisted in the Paperclip instance workspace mount, so the sandbox boundary limited blast radius but did not prevent cross-run contamination of the fallback workspace
+- the current runtime note advertises `PAPERCLIP_*` variables but does not clearly distinguish scratch fallback workspaces from real project workspaces, which encourages self-repair/bootstrap behavior instead of issue work
+- the user wants container isolation, not heavy-handed heartbeat lockdown, so the right near-term fix is better sandbox hygiene and clearer runtime context rather than broad command bans
+
+Files likely involved:
+- Modify: `server/src/services/heartbeat.ts`
+- Modify: `server/src/home-paths.ts`
+- Modify: `packages/adapters/cursor-local/src/server/execute.ts`
+- Add/update focused tests around fallback workspace reset behavior and Cursor runtime note rendering
+
+Required outcomes:
+- fallback agent workspaces are treated as scratch execution sandboxes, not durable pseudo-repos
+- fresh fallback runs start from a clean workspace baseline so cancelled/rogue prior runs do not poison later runs
+- fallback workspace state that should persist lives in the agent native home, not in arbitrary repo-like files under `/workspace`
+- Cursor's injected runtime note explicitly calls out when `/workspace` is a fallback scratch workspace and tells the agent not to bootstrap package managers or invent repo scaffolding unless the task explicitly requires it
+- the fix remains compatible with container autonomy; it should reduce accidental workspace damage without hard-blocking legitimate task commands inside a real project workspace
+
+Step 1: add or tighten failing regression tests for:
+- fallback workspace reset/scrub behavior for fresh runs without a project/prior-session workspace
+- fallback workspace session migration semantics that must still work when a real project workspace later becomes available
+- Cursor runtime note text for fallback scratch workspaces
+
+Step 2: implement the narrowest root-cause fixes:
+- reset or scrub fallback workspace contents at the start of fresh fallback runs
+- preserve the existing fallback path contract needed for session migration where appropriate
+- enrich the Cursor runtime note using `PAPERCLIP_WORKSPACE_SOURCE` / related context so the agent knows when it is in a scratch fallback workspace rather than a project checkout
+
+Step 3: run focused tests.
+
+Step 4: run local validation:
+- confirm a fresh fallback workspace no longer inherits prior accidental package-manager scaffolding
+- confirm the injected Cursor prompt/runtime note clearly marks scratch fallback mode
+
+Step 5: commit immediately once validated.
+
+Suggested commit message:
+- `fix: reset fallback workspaces and clarify cursor scratch mode`
+
+Validation:
+- focused vitest targets for heartbeat workspace handling and Cursor execute/runtime-note behavior
+- local filesystem validation of the fallback workspace before/after a fresh run
+
+---
+
 ## Slice 2: Generalize Hermes managed-runtime service into adapter-managed runtime service
 
 Objective: create a generic runtime freshness abstraction without breaking Hermes.

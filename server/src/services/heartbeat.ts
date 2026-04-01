@@ -682,6 +682,19 @@ export function formatRuntimeWorkspaceWarningLog(warning: string) {
   };
 }
 
+export async function resetFallbackWorkspaceForFreshRun(workspaceCwd: string) {
+  await fs.mkdir(workspaceCwd, { recursive: true });
+  const entries = await fs.readdir(workspaceCwd, { withFileTypes: true });
+  await Promise.all(
+    entries.map((entry) =>
+      fs.rm(path.join(workspaceCwd, entry.name), {
+        recursive: true,
+        force: true,
+      }),
+    ),
+  );
+}
+
 function describeSessionResetReason(
   contextSnapshot: Record<string, unknown> | null | undefined,
 ) {
@@ -1234,7 +1247,7 @@ export function heartbeatService(db: Db) {
       }
 
       const fallbackCwd = resolveDefaultAgentWorkspaceDir(agent.id);
-      await fs.mkdir(fallbackCwd, { recursive: true });
+      await resetFallbackWorkspaceForFreshRun(fallbackCwd);
       const warnings: string[] = [];
       if (preferredWorkspaceWarning) {
         warnings.push(preferredWorkspaceWarning);
@@ -1303,7 +1316,7 @@ export function heartbeatService(db: Db) {
     }
 
     const cwd = resolveDefaultAgentWorkspaceDir(agent.id);
-    await fs.mkdir(cwd, { recursive: true });
+    await resetFallbackWorkspaceForFreshRun(cwd);
     const warnings: string[] = [];
     if (sessionCwd) {
       warnings.push(
