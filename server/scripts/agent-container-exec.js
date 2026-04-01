@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 import http from "node:http";
 
+const DOCKER_SOCKET_PATH = process.env.PAPERCLIP_DOCKER_SOCKET_PATH?.trim() || "/var/run/docker.sock";
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value || !value.trim()) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value.trim();
+}
+
+async function readStdinFully() {
+  const chunks = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  return Buffer.concat(chunks);
 }
 
 function parseExecEnv() {
@@ -25,7 +35,7 @@ function dockerApiJson({ method, path, body }) {
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
-        socketPath: "/var/run/docker.sock",
+        socketPath: DOCKER_SOCKET_PATH,
         path: `/v1.41${path}`,
         method,
         headers: payload
@@ -71,17 +81,17 @@ async function createDockerExec({ containerId, cmd, env, workdir }) {
   return parsed.Id;
 }
 
-function startDockerExec({ execId }) {
+function startDockerExec({ execId, stdin }) {
   const payload = JSON.stringify({ Detach: false, Tty: false });
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
-        socketPath: "/var/run/docker.sock",
+        socketPath: DOCKER_SOCKET_PATH,
         path: `/v1.41/exec/${encodeURIComponent(execId)}/start`,
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "content-length": Buffer.byteLength(payload),
+          "content-length": Buffer.byteLength(payload) + stdin.length,
         },
       },
       (res) => {
@@ -110,9 +120,8 @@ function startDockerExec({ execId }) {
     );
     req.on("error", reject);
     req.write(payload);
-    process.stdin.on("data", (chunk) => req.write(chunk));
-    process.stdin.on("end", () => req.end());
-    process.stdin.resume();
+    if (stdin.length > 0) req.write(stdin);
+    req.end();
   });
 }
 
@@ -131,13 +140,14 @@ async function main() {
   const innerCommand = requiredEnv("PAPERCLIP_AGENT_CONTAINER_COMMAND");
   const workdir = process.env.PAPERCLIP_AGENT_CONTAINER_WORKDIR?.trim() || "/workspace";
   const env = parseExecEnv();
+  const stdin = await readStdinFully();
   const execId = await createDockerExec({
     containerId,
     cmd: [innerCommand, ...process.argv.slice(2)],
     env,
     workdir,
   });
-  await startDockerExec({ execId });
+  await startDockerExec({ execId, stdin });
   const exitCode = await inspectDockerExec(execId);
   process.exit(typeof exitCode === "number" ? exitCode : 1);
 }
