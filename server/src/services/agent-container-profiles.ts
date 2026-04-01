@@ -92,9 +92,17 @@ export function listAgentContainerProfiles(): AgentContainerProfile[] {
   return Object.values(PROFILES);
 }
 
+function normalizeAgentContainerAdapterType(adapterType: string): string {
+  return adapterType === "cursor_local" ? "cursor" : adapterType;
+}
+
+export function maybeGetAgentContainerProfile(adapterType: string): AgentContainerProfile | null {
+  const profile = PROFILES[normalizeAgentContainerAdapterType(adapterType)];
+  return profile ?? null;
+}
+
 export function getAgentContainerProfile(adapterType: string): AgentContainerProfile {
-  const normalizedAdapterType = adapterType === "cursor_local" ? "cursor" : adapterType;
-  const profile = PROFILES[normalizedAdapterType];
+  const profile = maybeGetAgentContainerProfile(adapterType);
   if (!profile) {
     throw new Error(`Unsupported agent container adapter type: ${adapterType}`);
   }

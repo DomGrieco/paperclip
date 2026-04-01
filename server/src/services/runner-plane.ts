@@ -1,4 +1,5 @@
 import type { RuntimeBundleRunner } from "@paperclipai/shared";
+import { maybeGetAgentContainerProfile } from "./agent-container-profiles.js";
 import type { RuntimeServiceRef } from "./workspace-runtime.js";
 
 export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unknown> | null): RuntimeBundleRunner {
@@ -51,6 +52,33 @@ export function resolvePlannedRunnerSnapshot(projectPolicy: Record<string, unkno
     browserCapable: false,
     sandboxed: false,
     isolationBoundary: "host_process",
+  };
+}
+
+export function applyPlannedRunnerOverride(input: {
+  planned: RuntimeBundleRunner;
+  override?: Pick<RuntimeBundleRunner, "target" | "provider" | "browserCapable" | "sandboxed" | "isolationBoundary"> | null;
+}): RuntimeBundleRunner {
+  if (!input.override) return input.planned;
+  return {
+    ...input.planned,
+    ...input.override,
+  };
+}
+
+export function resolveContainerRunnerOverride(input: {
+  adapterType: string;
+  launcherEnabled: boolean;
+}): Pick<RuntimeBundleRunner, "target" | "provider" | "browserCapable" | "sandboxed" | "isolationBoundary"> | null {
+  if (!input.launcherEnabled) return null;
+  const profile = maybeGetAgentContainerProfile(input.adapterType);
+  if (!profile) return null;
+  return {
+    target: profile.runnerProvider,
+    provider: profile.runnerProvider,
+    browserCapable: profile.browserCapable,
+    sandboxed: true,
+    isolationBoundary: "container_process",
   };
 }
 

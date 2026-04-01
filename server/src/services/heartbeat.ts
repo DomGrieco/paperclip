@@ -59,12 +59,12 @@ import { hermesBootstrapProfileService } from "./hermes-bootstrap-profiles.js";
 import { buildHermesContainerLaunchPlan } from "./hermes-container-plan.js";
 import { buildAgentContainerLaunchPlan } from "./agent-container-plan.js";
 import { getAgentContainerProfile } from "./agent-container-profiles.js";
-import { injectAgentContainerLauncherService } from "./hermes-container-launcher.js";
+import { injectAgentContainerLauncherService, isHermesContainerLauncherEnabled } from "./hermes-container-launcher.js";
 import { resolveRuntimeBundle, resolveRuntimeBundleTarget } from "./runtime-bundle.js";
 import { materializeEffectiveSkills, managedSkillService } from "./managed-skills.js";
 import { importNativeSkillsFromCompletedRun } from "./agent-native-skill-imports.js";
 import { importNativeMemoryFromCompletedRun } from "./agent-native-memory.js";
-import { resolveObservedRunnerSnapshot } from "./runner-plane.js";
+import { resolveContainerRunnerOverride, resolveObservedRunnerSnapshot } from "./runner-plane.js";
 import { logActivity } from "./activity-log.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
@@ -2203,6 +2203,10 @@ export function heartbeatService(db: Db) {
     }));
     const runtimeBundleTarget =
       issueId ? resolveRuntimeBundleTargetForAgent(agent.adapterType) : null;
+    const runtimeBundleRunnerOverride = resolveContainerRunnerOverride({
+      adapterType: agent.adapterType,
+      launcherEnabled: isHermesContainerLauncherEnabled(resolvedConfig),
+    });
     const runtimeBundle =
       runtimeBundleTarget && issueId
         ? await resolveRuntimeBundle(db, {
@@ -2211,6 +2215,7 @@ export function heartbeatService(db: Db) {
             agentId: agent.id,
             runId: run.id,
             runtime: runtimeBundleTarget,
+            runnerOverride: runtimeBundleRunnerOverride,
           })
         : null;
     attachRuntimeBundleToContext(context, runtimeBundle);

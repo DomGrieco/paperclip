@@ -236,6 +236,68 @@ describe("resolveRuntimeBundle", () => {
     expect(bundle.projection.runtime).toBe("codex");
   }, 20_000);
 
+  it("applies explicit container runner overrides so the materialized bundle matches planned container execution", async () => {
+    const connectionString = await createTempDatabase();
+    await applyPendingMigrations(connectionString);
+
+    const db = createDb(connectionString);
+
+    const [company] = await db.insert(companies).values({ name: "Paperclip", issuePrefix: "TST" }).returning();
+    const [project] = await db.insert(projects).values({
+      companyId: company.id,
+      name: "Container Runtime Bundle Project",
+      status: "in_progress",
+      executionWorkspacePolicy: {
+        defaultMode: "isolated_workspace",
+        workspaceStrategy: { type: "git_worktree" },
+      },
+    }).returning();
+    const [agent] = await db.insert(agents).values({
+      companyId: company.id,
+      projectId: project.id,
+      name: "Worker",
+      role: "engineer",
+      adapterType: "codex_local",
+      adapterConfig: {},
+      runtimeConfig: {},
+      permissions: {},
+    }).returning();
+    const [issue] = await db.insert(issues).values({
+      companyId: company.id,
+      projectId: project.id,
+      title: "Use managed container runtime",
+      status: "in_progress",
+      priority: "high",
+      assigneeAgentId: agent.id,
+    }).returning();
+
+    const bundle = await resolveRuntimeBundle(db, {
+      companyId: company.id,
+      issueId: issue.id,
+      agentId: agent.id,
+      runId: null,
+      runtime: "codex",
+      runnerOverride: {
+        target: "agent_container",
+        provider: "agent_container",
+        browserCapable: false,
+        sandboxed: true,
+        isolationBoundary: "container_process",
+      },
+    });
+
+    expect(bundle.runner).toEqual({
+      target: "agent_container",
+      provider: "agent_container",
+      workspaceStrategyType: "git_worktree",
+      executionMode: "isolated_workspace",
+      browserCapable: false,
+      sandboxed: true,
+      isolationBoundary: "container_process",
+    });
+    expect(bundle.verification.runner).toEqual(bundle.runner);
+  }, 20_000);
+
   it("carries issue-level evidence policy overrides into the runtime bundle policy block", async () => {
     const connectionString = await createTempDatabase();
     await applyPendingMigrations(connectionString);

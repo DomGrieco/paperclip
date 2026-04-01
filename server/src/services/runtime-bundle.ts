@@ -13,7 +13,7 @@ import type {
   SwarmSubtask,
 } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
-import { applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
+import { applyPlannedRunnerOverride, applyVerificationRunnerPolicy, resolvePlannedRunnerSnapshot } from "./runner-plane.js";
 import {
   buildExecutionWorkspaceAdapterConfig,
   parseIssueExecutionWorkspaceSettings,
@@ -28,6 +28,7 @@ type ResolveRuntimeBundleInput = {
   agentId: string;
   runId?: string | null;
   runtime: RuntimeBundleTarget;
+  runnerOverride?: Pick<RuntimeBundle["runner"], "target" | "provider" | "browserCapable" | "sandboxed" | "isolationBoundary"> | null;
 };
 
 const DEFAULT_MAX_REPAIR_ATTEMPTS = 3;
@@ -243,10 +244,13 @@ export async function resolveRuntimeBundle(db: Db, input: ResolveRuntimeBundleIn
           : null,
     });
   })();
-  const effectiveRunner = applyVerificationRunnerPolicy({
-    planned: plannedRunner,
-    runType: run?.runType ?? null,
-    evidencePolicy: issue.evidencePolicy,
+  const effectiveRunner = applyPlannedRunnerOverride({
+    planned: applyVerificationRunnerPolicy({
+      planned: plannedRunner,
+      runType: run?.runType ?? null,
+      evidencePolicy: issue.evidencePolicy,
+    }),
+    override: input.runnerOverride ?? null,
   });
   const sharedContextSnippets = await sharedContextService(db).listRuntimeMemorySnippets({
     companyId: input.companyId,
