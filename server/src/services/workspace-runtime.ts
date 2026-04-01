@@ -1523,13 +1523,15 @@ export async function listWorkspaceRuntimeServicesForProjectWorkspaces(
 }
 
 export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
+  const restartScopedProviders: Array<string> = ["local_process", "hermes_container", "agent_container"];
+  const activeStatuses: Array<string> = ["starting", "running"];
   const staleRows = await db
     .select({ id: workspaceRuntimeServices.id })
     .from(workspaceRuntimeServices)
     .where(
       and(
-        inArray(workspaceRuntimeServices.provider, ["local_process", "hermes_container"]),
-        inArray(workspaceRuntimeServices.status, ["starting", "running"]),
+        inArray(workspaceRuntimeServices.provider, restartScopedProviders),
+        inArray(workspaceRuntimeServices.status, activeStatuses),
       ),
     );
 
@@ -1547,8 +1549,8 @@ export async function reconcilePersistedRuntimeServicesOnStartup(db: Db) {
     })
     .where(
       and(
-        inArray(workspaceRuntimeServices.provider, ["local_process", "hermes_container"]),
-        inArray(workspaceRuntimeServices.status, ["starting", "running"]),
+        inArray(workspaceRuntimeServices.provider, restartScopedProviders),
+        inArray(workspaceRuntimeServices.status, activeStatuses),
       ),
     );
 
