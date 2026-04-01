@@ -23,7 +23,7 @@ import {
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { parseCodexJsonl, isCodexTransientServerError, isCodexUnknownSessionError } from "./parse.js";
-import { pathExists, prepareWorktreeCodexHome, resolveCodexHomeDir } from "./codex-home.js";
+import { pathExists, prepareWorktreeCodexHome, resolveCodexHomeDir, syncSharedCodexHome } from "./codex-home.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
@@ -242,6 +242,17 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const preparedWorktreeCodexHome =
     configuredCodexHome ? null : await prepareWorktreeCodexHome(process.env, onLog);
   const effectiveCodexHome = configuredCodexHome ?? preparedWorktreeCodexHome;
+  const sharedCodexHomeSource =
+    typeof envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE === "string" && envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim().length > 0
+      ? path.resolve(envConfig.PAPERCLIP_CODEX_SHARED_HOME_SOURCE.trim())
+      : null;
+  if (effectiveCodexHome && sharedCodexHomeSource) {
+    await syncSharedCodexHome({
+      targetHome: effectiveCodexHome,
+      sourceHome: sharedCodexHomeSource,
+      onLog,
+    });
+  }
   const materializedSkillsDir = asString(context.paperclipSkillsDir, "");
   await ensureCodexSkillsInjected(
     onLog,

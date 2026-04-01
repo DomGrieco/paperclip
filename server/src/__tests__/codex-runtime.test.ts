@@ -38,6 +38,7 @@ describe("prepareCodexAdapterConfigForExecution", () => {
       PAPERCLIP_CODEX_MANAGED_RUNTIME_CHANNEL: "stable",
       PAPERCLIP_CODEX_MANAGED_RUNTIME_SOURCE: "@openai/codex@latest",
       PAPERCLIP_CODEX_MANAGED_RUNTIME_REFRESHED: "true",
+      PAPERCLIP_CODEX_SHARED_HOME_SOURCE: "/paperclip/shared/codex-home-source",
     });
   });
 

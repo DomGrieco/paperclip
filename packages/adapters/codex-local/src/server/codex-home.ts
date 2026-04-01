@@ -69,6 +69,43 @@ async function ensureCopiedFile(target: string, source: string): Promise<void> {
   await fs.copyFile(source, target);
 }
 
+export async function syncSharedCodexHome(input: {
+  targetHome: string;
+  sourceHome: string;
+  onLog?: AdapterExecutionContext["onLog"];
+}): Promise<boolean> {
+  const targetHome = path.resolve(input.targetHome);
+  const sourceHome = path.resolve(input.sourceHome);
+  if (targetHome === sourceHome) return false;
+  if (!(await pathExists(sourceHome))) return false;
+
+  await fs.mkdir(targetHome, { recursive: true });
+
+  let copiedAny = false;
+  for (const name of SYMLINKED_SHARED_FILES) {
+    const source = path.join(sourceHome, name);
+    if (!(await pathExists(source))) continue;
+    await ensureSymlink(path.join(targetHome, name), source);
+    copiedAny = true;
+  }
+
+  for (const name of COPIED_SHARED_FILES) {
+    const source = path.join(sourceHome, name);
+    if (!(await pathExists(source))) continue;
+    await ensureCopiedFile(path.join(targetHome, name), source);
+    copiedAny = true;
+  }
+
+  if (copiedAny && input.onLog) {
+    await input.onLog(
+      "stdout",
+      `[paperclip] Seeded Codex home "${targetHome}" from shared source "${sourceHome}".\n`,
+    );
+  }
+
+  return copiedAny;
+}
+
 export async function prepareWorktreeCodexHome(
   env: NodeJS.ProcessEnv,
   onLog: AdapterExecutionContext["onLog"],

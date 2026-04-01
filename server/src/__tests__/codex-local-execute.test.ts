@@ -260,6 +260,7 @@ describe("codex execute", () => {
           env: {
             PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
             CODEX_HOME: explicitCodexHome,
+            PAPERCLIP_CODEX_SHARED_HOME_SOURCE: sharedCodexHome,
           },
           promptTemplate: "Follow the paperclip heartbeat.",
         },

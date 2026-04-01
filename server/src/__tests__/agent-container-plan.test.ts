@@ -191,6 +191,7 @@ describe("buildAgentContainerLaunchPlan", () => {
             "/tmp/paperclip/runtime-cache/codex_local/channels/stable/installs/current",
           PAPERCLIP_CODEX_MANAGED_RUNTIME_COMMAND:
             "/tmp/paperclip/runtime-cache/codex_local/channels/stable/installs/current/bin/codex",
+          PAPERCLIP_CODEX_SHARED_HOME_SOURCE: "/paperclip/shared/codex-home-source",
         },
       },
     });

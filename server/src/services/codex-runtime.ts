@@ -5,6 +5,7 @@ import { ensureManagedCodexRuntime, type CodexManagedRuntimeResolution } from ".
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const containerExecScriptPath = path.resolve(moduleDir, "..", "..", "scripts", "agent-container-exec.js");
+const DEFAULT_SHARED_CODEX_HOME_SOURCE = "/paperclip/shared/codex-home-source";
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -45,6 +46,9 @@ export async function prepareCodexAdapterConfigForExecution(input: {
     env.PAPERCLIP_CODEX_MANAGED_RUNTIME_CHECKED_AT = managedRuntime.checkedAt;
     env.PAPERCLIP_CODEX_MANAGED_RUNTIME_REFRESHED = managedRuntime.refreshed ? "true" : "false";
   }
+
+  env.PAPERCLIP_CODEX_SHARED_HOME_SOURCE = readString(env.PAPERCLIP_CODEX_SHARED_HOME_SOURCE)
+    ?? DEFAULT_SHARED_CODEX_HOME_SOURCE;
 
   nextConfig.env = env;
   return nextConfig;
